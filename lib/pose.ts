@@ -6,6 +6,7 @@
  * landmarker, and stored by frame index — scrubbing afterwards is a plain array lookup.
  */
 import type { PoseLandmarker as PoseLandmarkerT } from "@mediapipe/tasks-vision";
+import { asset } from "./basePath";
 
 /** Normalized image landmark: x/y in 0..1 of the video frame, v = visibility (0..1). */
 export interface Lm {
@@ -44,7 +45,7 @@ export const MODEL_URLS: Record<PoseModel, string> = {
 };
 
 /** WASM runtime is copied into public/ by scripts/copy-mediapipe.mjs (postinstall). */
-const WASM_BASE = "/mediapipe/wasm";
+const WASM_BASE = asset("/mediapipe/wasm");
 
 // ── Landmark indices (MediaPipe BlazePose, subject's own left/right) ──
 export const LM = {

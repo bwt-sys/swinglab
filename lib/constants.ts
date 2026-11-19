@@ -1,3 +1,4 @@
+import { asset } from "./basePath";
 import type { CheckpointKey, Tool } from "./types";
 
 export const NEON_COLORS = [
@@ -26,4 +27,4 @@ export const TOOLS: { id: Tool; label: string; shortcut: string; hint: string }[
 
 export const SUPPORTED_EXTENSIONS = [".mp4", ".mov", ".webm", ".m4v"];
 
-export const SAMPLE_VIDEO_URL = "/sample-swing.mp4";
+export const SAMPLE_VIDEO_URL = asset("/sample-swing.mp4");
