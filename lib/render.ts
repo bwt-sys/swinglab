@@ -190,10 +190,13 @@ export function renderScene(ctx: CanvasRenderingContext2D, shapes: Shape[], opts
     strokeShape(ctx, s, w, h);
     ctx.setLineDash([]);
     ctx.shadowBlur = 0;
-    drawLabels(ctx, s, w, h);
+    // Reference presets stay clean: just the guide line/shape, no measurement pill.
+    if (!s.presetId) drawLabels(ctx, s, w, h);
     ctx.restore();
 
-    if (opts.showHandles || selected || s.presetId || s === opts.draft) {
+    // Handle dots: user drawings in Move mode, anything selected, and the shape being drawn.
+    // Presets only show them while selected, so they don't clutter the video.
+    if ((opts.showHandles && !s.presetId) || selected || s === opts.draft) {
       drawHandles(ctx, s, w, h, opts.hoverHandle, !!opts.touch, !!opts.touch && (selected || s === opts.draft));
     }
   }

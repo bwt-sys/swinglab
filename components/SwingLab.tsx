@@ -578,6 +578,7 @@ export default function SwingLab() {
           selectedId={S.selectedId}
           onSelect={S.setSelectedId}
           sideLabel={compare ? SIDE_LABEL[activeK] : undefined}
+          posed={!!S.poseTrack}
           drawerOpen={drawerOpen}
           onCloseDrawer={() => setDrawerOpen(false)}
           topPanel={

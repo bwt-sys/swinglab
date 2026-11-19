@@ -8,6 +8,7 @@ import { computeMetrics, keyNumbers, type Handed } from "@/lib/metrics";
 import { detectPhases } from "@/lib/phases";
 import { analyzeVideo, detectedCount, poseAt, type PoseModel, type PoseTrack } from "@/lib/pose";
 import { PRESETS } from "@/lib/presets";
+import { fitPreset } from "@/lib/presetFit";
 import type { Bookmarks, CameraAngle, CheckpointKey, Fps, Shape, VideoMeta } from "@/lib/types";
 
 const MAX_HISTORY = 100;
@@ -424,18 +425,23 @@ export function useSwingSide(o: SideOptions) {
       }
       const def = PRESETS.find((p) => p.id === presetId);
       if (!def) return;
+      // Snap to the golfer: pose at Address if tagged and detected, otherwise the current frame.
+      const pose = (bookmarks.A !== undefined ? poseAt(poseTrack, bookmarks.A) : null) ?? poseAt(poseTrack, videoRef.current?.currentTime ?? 0);
+      const fitted = meta ? fitPreset(def, pose, meta.width, meta.height, handed) : null;
+      let points = fitted ?? def.points.map((p) => ({ ...p }));
+      // A mirrored (Flip Horizontal) video shows the golfer flipped, while drawings stay in screen space.
+      if (fitted && flip) points = points.map((p) => ({ x: 1 - p.x, y: p.y }));
       const shape: Shape = {
         id: newId(),
         kind: def.kind,
         color: def.color,
-        points: def.points.map((p) => ({ ...p })),
+        points,
         presetId: def.id,
         label: def.name,
       };
       setShapes((prev) => [...prev, shape]);
-      setSelectedId(shape.id);
     },
-    [checkpoint, selectedId],
+    [checkpoint, selectedId, bookmarks.A, poseTrack, meta, handed, flip],
   );
 
   // ── Current-frame pose + metrics (pure lookups, no inference) ───

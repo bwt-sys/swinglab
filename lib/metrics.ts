@@ -165,7 +165,7 @@ export function leadKneeAngle(f: PoseFrame | null, W: number, H: number, s: Side
 }
 
 /** +1 if the target is toward image-right, −1 if toward image-left (face-on). */
-function targetDir(f: PoseFrame | null, W: number, H: number, s: { lead: Side; trail: Side }): number | null {
+export function targetDir(f: PoseFrame | null, W: number, H: number, s: { lead: Side; trail: Side }): number | null {
   const l = pt(f, s.lead.shoulder, W, H) ?? pt(f, s.lead.hip, W, H);
   const t = pt(f, s.trail.shoulder, W, H) ?? pt(f, s.trail.hip, W, H);
   if (!l || !t || Math.abs(l.x - t.x) < 1) return null;
@@ -173,7 +173,7 @@ function targetDir(f: PoseFrame | null, W: number, H: number, s: { lead: Side; t
 }
 
 /** +1 if the ball is toward image-right, −1 if image-left (down-the-line: hands hang toward the ball). */
-function ballDir(f: PoseFrame | null, W: number, H: number): number | null {
+export function ballDir(f: PoseFrame | null, W: number, H: number): number | null {
   const w = mid(f, LM.leftWrist, LM.rightWrist, W, H);
   const h = hipMid(f, W, H);
   if (!w || !h || Math.abs(w.x - h.x) < 1) return null;

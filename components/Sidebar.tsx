@@ -26,6 +26,8 @@ interface Props {
   topPanel?: React.ReactNode;
   /** Compare mode: which video the per-video sections below refer to. */
   sideLabel?: string;
+  /** A pose track exists, so presets will snap to the golfer. */
+  posed?: boolean;
   /** Below the lg breakpoint the sidebar is an off-canvas drawer. */
   drawerOpen?: boolean;
   onCloseDrawer?: () => void;
@@ -137,7 +139,9 @@ export default function Sidebar(p: Props) {
           })}
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          Presets assume a right-handed golfer. Drag the handles to fit your setup.
+          {p.posed
+            ? "Presets snap to the golfer at Address (A), or the current frame if A isn't tagged. To adjust one, pick Move and tap its line."
+            : "Run Analyze Swing (AI) first and presets snap to the golfer's body. Without it they use a generic position."}
         </p>
       </Section>
 
