@@ -29,6 +29,14 @@ interface Props {
   pose: PoseFrame | null;
   handed: Handed;
   showSkeleton: boolean;
+  /** Mirror the video + skeleton horizontally (display only; drawings stay in screen space). */
+  flip?: boolean;
+  /** Smaller empty state for split-screen. */
+  compact?: boolean;
+  emptyTitle?: string;
+  /** Called on any pointer press inside the stage (compare mode: make this side active). */
+  onActivate?: () => void;
+  active?: boolean;
 }
 
 export default function VideoStage(props: Props) {
@@ -51,7 +59,7 @@ export default function VideoStage(props: Props) {
   }, []);
 
   // Contain-fit: largest box with the video's aspect ratio that fits the stage.
-  const pad = 24;
+  const pad = props.compact ? 12 : 24;
   const availW = Math.max(0, stage.w - pad * 2);
   const availH = Math.max(0, stage.h - pad * 2);
   let boxW = availW;
@@ -73,7 +81,10 @@ export default function VideoStage(props: Props) {
   return (
     <div
       ref={stageRef}
-      className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-800 bg-[radial-gradient(ellipse_at_center,_#0f172a_0%,_#020617_75%)]"
+      className={`relative min-h-0 flex-1 overflow-hidden rounded-2xl border bg-[radial-gradient(ellipse_at_center,_#0f172a_0%,_#020617_75%)] ${
+        props.active ? "border-emerald-500/60" : "border-slate-800"
+      }`}
+      onPointerDownCapture={props.onActivate}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -103,6 +114,7 @@ export default function VideoStage(props: Props) {
             ref={videoRef}
             src={src}
             className="absolute inset-0 h-full w-full object-contain"
+            style={props.flip ? { transform: "scaleX(-1)" } : undefined}
             playsInline
             preload="auto"
             muted
@@ -110,7 +122,9 @@ export default function VideoStage(props: Props) {
             onError={props.onVideoError}
           />
           {props.showSkeleton && (
-            <PoseOverlay width={boxW} height={boxH} pose={props.pose} handed={props.handed} />
+            <div className="pointer-events-none absolute inset-0" style={props.flip ? { transform: "scaleX(-1)" } : undefined}>
+              <PoseOverlay width={boxW} height={boxH} pose={props.pose} handed={props.handed} />
+            </div>
           )}
           <TelestratorCanvas
             width={boxW}
@@ -129,7 +143,9 @@ export default function VideoStage(props: Props) {
       {!src && (
         <div className="absolute inset-0 flex items-center justify-center p-6">
           <div
-            className={`flex w-full max-w-lg flex-col items-center gap-5 rounded-2xl border-2 border-dashed px-8 py-12 text-center transition ${
+            className={`flex w-full max-w-lg flex-col items-center rounded-2xl border-2 border-dashed text-center transition ${
+              props.compact ? "gap-3 px-4 py-6" : "gap-5 px-8 py-12"
+            } ${
               dragOver ? "border-emerald-400 bg-emerald-400/5" : "border-slate-700 bg-slate-900/40"
             }`}
           >
@@ -139,7 +155,7 @@ export default function VideoStage(props: Props) {
               </svg>
             </div>
             <div>
-              <p className="text-lg font-semibold text-slate-100">Drop a swing video here</p>
+              <p className="text-lg font-semibold text-slate-100">{props.emptyTitle ?? "Drop a swing video here"}</p>
               <p className="mt-1 text-sm text-slate-400">MP4, MOV or WebM · vertical or horizontal</p>
             </div>
             <div className="flex flex-wrap justify-center gap-3">

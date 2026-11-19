@@ -22,6 +22,10 @@ interface Props {
   onSelect: (id: string | null) => void;
   /** AI pose analysis + live metrics, rendered at the top of the sidebar. */
   aiPanel?: React.ReactNode;
+  /** Rendered above everything (compare mode: You vs Pro table). */
+  topPanel?: React.ReactNode;
+  /** Compare mode: which video the per-video sections below refer to. */
+  sideLabel?: string;
 }
 
 function describeShape(s: Shape, w: number, h: number): { name: string; value: string } {
@@ -59,6 +63,12 @@ export default function Sidebar(p: Props) {
 
   return (
     <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-r border-slate-800 bg-slate-950/60">
+      {p.topPanel}
+      {p.sideLabel && (
+        <div className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 backdrop-blur">
+          Below: {p.sideLabel}
+        </div>
+      )}
       {p.aiPanel}
       <Section
         title={p.angle === "DTL" ? "DTL reference presets" : "Face-on reference presets"}
@@ -100,7 +110,7 @@ export default function Sidebar(p: Props) {
         </p>
       </Section>
 
-      <Section title="Swing checkpoints">
+      <Section title={p.sideLabel ? `Swing checkpoints · ${p.sideLabel}` : "Swing checkpoints"}>
         <div className="flex flex-col gap-1.5">
           {CHECKPOINTS.map((c) => {
             const t = p.bookmarks[c.key];

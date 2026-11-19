@@ -173,6 +173,59 @@ function ballDir(f: PoseFrame | null, W: number, H: number): number | null {
   return Math.sign(w.x - h.x);
 }
 
+// ── Numeric key positions (compare mode) ──────────────────────────────
+export interface KeyNumbers {
+  /** DTL */
+  spineNow: number | null;
+  spineA: number | null;
+  spineI: number | null;
+  /** Spine angle change Address → Impact (negative = standing up / early extension). */
+  spineLossI: number | null;
+  armT: number | null;
+  /** FO (inches, + = toward target; each golfer calibrated by their own shoulder width) */
+  headNow: number | null;
+  headT: number | null;
+  headI: number | null;
+  hipT: number | null;
+  hipI: number | null;
+  tiltI: number | null;
+}
+
+/**
+ * Raw numbers for one golfer. Everything is relative to that golfer's own lead/trail sides,
+ * target direction and shoulder width, so values are comparable between two different videos
+ * (camera distance, handedness and a mirrored display don't change them).
+ */
+export function keyNumbers(m: Omit<MetricInput, "hasA">): KeyNumbers {
+  const { width: W, height: H, cur, at } = m;
+  const sides = sidesFor(m.handed);
+  const A = at.A;
+
+  const spineA = spineAngle(A, W, H);
+  const spineI = spineAngle(at.I, W, H);
+
+  const swA = shoulderWidthPx(A, W, H) ?? shoulderWidthPx(cur, W, H);
+  const tdir = targetDir(A, W, H, sides) ?? targetDir(cur, W, H, sides);
+  const hdA = headPoint(A, W, H);
+  const hpA = hipMid(A, W, H);
+  const along = (p: Pt | null, ref: Pt | null) =>
+    p && ref && swA && tdir !== null ? ((p.x - ref.x) * tdir * SHOULDER_WIDTH_IN) / swA : null;
+
+  return {
+    spineNow: spineAngle(cur, W, H),
+    spineA,
+    spineI,
+    spineLossI: spineA !== null && spineI !== null ? spineI - spineA : null,
+    armT: leadArmAngle(at.T, W, H, sides.lead),
+    headNow: along(headPoint(cur, W, H), hdA),
+    headT: along(headPoint(at.T, W, H), hdA),
+    headI: along(headPoint(at.I, W, H), hdA),
+    hipT: along(hipMid(at.T, W, H), hpA),
+    hipI: along(hipMid(at.I, W, H), hpA),
+    tiltI: shoulderTilt(at.I, W, H, sides),
+  };
+}
+
 // ── Sidebar rows ──────────────────────────────────────────────────────
 export type Tone = "neutral" | "good" | "warn";
 

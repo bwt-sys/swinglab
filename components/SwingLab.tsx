@@ -1,395 +1,196 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AngleToggle from "./AngleToggle";
+import ComparePanel, { type SideKey } from "./ComparePanel";
 import DrawingToolbar from "./DrawingToolbar";
-import PosePanel, { type AnalysisState } from "./PosePanel";
+import PosePanel from "./PosePanel";
 import Sidebar from "./Sidebar";
-import { computeMetrics, type Handed } from "@/lib/metrics";
-import { detectPhases } from "@/lib/phases";
-import { analyzeVideo, detectedCount, poseAt, type PoseModel, type PoseTrack } from "@/lib/pose";
+import SyncBar from "./SyncBar";
 import TransportControls from "./TransportControls";
+import { useSwingSide, type SwingSide } from "./useSwingSide";
 import VideoStage from "./VideoStage";
-import { NEON_COLORS, SAMPLE_VIDEO_URL, SUPPORTED_EXTENSIONS, TOOLS } from "@/lib/constants";
-import { newId } from "@/lib/geometry";
-import { PRESETS } from "@/lib/presets";
-import type { Bookmarks, CameraAngle, CheckpointKey, Fps, Shape, Tool, VideoMeta } from "@/lib/types";
+import { NEON_COLORS, TOOLS } from "@/lib/constants";
+import type { PoseModel } from "@/lib/pose";
+import type { Bookmarks, CameraAngle, CheckpointKey, Fps, Tool } from "@/lib/types";
 
-const MAX_HISTORY = 100;
+type Mode = "single" | "compare";
+
+const SIDE_LABEL: Record<SideKey, string> = { L: "Your Swing", R: "Reference / Pro Swing" };
+const ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v";
 
 export default function SwingLab() {
-  // ── Session state ────────────────────────────────────────────────
+  // ── Shared settings ──────────────────────────────────────────────
+  const [mode, setMode] = useState<Mode>("single");
   const [angle, setAngle] = useState<CameraAngle>("DTL");
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
-  const pendingNameRef = useRef<string>("");
-  const [src, setSrc] = useState<string | null>(null);
-  const [meta, setMeta] = useState<VideoMeta | null>(null);
-  const [aspect, setAspect] = useState(16 / 9);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // ── Playback ─────────────────────────────────────────────────────
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
   const [rate, setRate] = useState(1);
   const [fps, setFps] = useState<Fps>(30);
-  const [bookmarks, setBookmarks] = useState<Bookmarks>({});
-
-  // ── Telestrator ──────────────────────────────────────────────────
-  const [shapes, setShapes] = useState<Shape[]>([]);
   const [tool, setTool] = useState<Tool>("line");
   const [color, setColor] = useState<string>(NEON_COLORS[0].value);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const shapesRef = useRef<Shape[]>(shapes);
-  shapesRef.current = shapes;
-  const historyRef = useRef<Shape[][]>([]);
-  const [historyLen, setHistoryLen] = useState(0);
-
-  const checkpoint = useCallback(() => {
-    historyRef.current.push(shapesRef.current);
-    if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
-    setHistoryLen(historyRef.current.length);
-  }, []);
-
-  const undo = useCallback(() => {
-    const prev = historyRef.current.pop();
-    if (prev !== undefined) {
-      setShapes(prev);
-      setSelectedId(null);
-    }
-    setHistoryLen(historyRef.current.length);
-  }, []);
-
-  const clearAll = useCallback(() => {
-    if (shapesRef.current.length === 0) return;
-    checkpoint();
-    setShapes([]);
-    setSelectedId(null);
-  }, [checkpoint]);
-
-  // ── AI pose ──────────────────────────────────────────────────────
-  const [poseTrack, setPoseTrack] = useState<PoseTrack | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisState>({ status: "idle", done: 0, total: 0, message: null });
   const [poseModel, setPoseModel] = useState<PoseModel>("full");
-  const [handed, setHanded] = useState<Handed>("R");
   const [showSkeleton, setShowSkeleton] = useState(true);
-  const [phaseMessage, setPhaseMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const [activeKey, setActiveKey] = useState<SideKey>("L");
 
-  const resetSession = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setPoseTrack(null);
-    setAnalysis({ status: "idle", done: 0, total: 0, message: null });
-    setPhaseMessage(null);
-    setShapes([]);
-    historyRef.current = [];
-    setHistoryLen(0);
-    setSelectedId(null);
-    setBookmarks({});
-    setCurrentTime(0);
-    setPlaying(false);
-    setMeta(null);
-  };
+  // ── Sync lock (compare mode) ─────────────────────────────────────
+  /** Reference time minus your time at the locked alignment, in seconds. */
+  const [sync, setSync] = useState<{ locked: boolean; offset: number }>({ locked: false, offset: 0 });
+  const compare = mode === "compare";
+  const locked = compare && sync.locked;
 
-  // ── Loading video ────────────────────────────────────────────────
-  const loadFile = useCallback((file: File) => {
-    const lower = file.name.toLowerCase();
-    const ok = file.type.startsWith("video/") || SUPPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
-    if (!ok) {
-      setError(`"${file.name}" isn't a supported video. Use .mp4, .mov or .webm.`);
+  // Navigation seeks (Go to checkpoint, auto-detect) are routed through the sync controller while locked.
+  const navL = useRef<((t: number) => void) | null>(null);
+  const navR = useRef<((t: number) => void) | null>(null);
+
+  // ── The two videos ───────────────────────────────────────────────
+  const L = useSwingSide({ angle, fps, rate, poseModel, onSampleLoaded: () => setAngle("FO"), navigate: navL });
+  const R = useSwingSide({ angle, fps, rate, poseModel, onSampleLoaded: () => setAngle("FO"), navigate: navR, sampleName: "Sample swing (reference)" });
+  const sides: Record<SideKey, SwingSide> = { L, R };
+  const activeK: SideKey = compare ? activeKey : "L";
+  const S = sides[activeK];
+
+  const activate = useCallback(
+    (k: SideKey) => {
+      setActiveKey(k);
+      // Only one side can hold a selection, so Delete/colour changes never hit the other video.
+      (k === "L" ? R : L).setSelectedId(null);
+    },
+    [L, R],
+  );
+
+  // ── Linked (master) transport ────────────────────────────────────
+  const offFrames = Math.round(sync.offset * fps);
+  const bothReady = L.ready && R.ready;
+  /** Range of *your* frames for which the reference also has footage. */
+  const lo = Math.max(0, -offFrames);
+  const hi = Math.min(L.lastFrame, R.lastFrame - offFrames);
+  const linkedOk = bothReady && hi >= lo;
+
+  const masterSeekFrame = useCallback(
+    (fL: number) => {
+      if (!linkedOk) return;
+      const f = Math.max(lo, Math.min(hi, fL));
+      L.seekFrame(f);
+      R.seekFrame(f + offFrames);
+    },
+    [linkedOk, lo, hi, offFrames, L, R],
+  );
+
+  const masterSeekTime = useCallback((tL: number) => masterSeekFrame(L.frameOf(tL)), [masterSeekFrame, L]);
+
+  const masterStep = useCallback(
+    (n: number) => {
+      const v = L.videoRef.current;
+      if (!v) return;
+      L.pause();
+      R.pause();
+      masterSeekFrame(L.frameOf(v.currentTime) + n);
+    },
+    [L, R, masterSeekFrame],
+  );
+
+  const masterPlaying = L.playing || R.playing;
+  const lVideo = L.videoRef;
+  const rVideo = R.videoRef;
+  const masterToggle = useCallback(() => {
+    const lv = L.videoRef.current;
+    const rv = R.videoRef.current;
+    if (!lv || !rv || !linkedOk) return;
+    if (!lv.paused || !rv.paused) {
+      lv.pause();
+      rv.pause();
+      masterSeekFrame(L.frameOf(lv.currentTime)); // re-align exactly on the frame
       return;
     }
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    const url = URL.createObjectURL(file);
-    objectUrlRef.current = url;
-    pendingNameRef.current = file.name;
-    resetSession();
-    setError(null);
-    setLoading(true);
-    setSrc(url);
-  }, []);
+    let f = L.frameOf(lv.currentTime);
+    if (f >= hi || f < lo) f = lo;
+    masterSeekFrame(f);
+    lv.playbackRate = rate;
+    rv.playbackRate = rate;
+    lv.play().catch(() => undefined);
+    rv.play().catch(() => undefined);
+  }, [L, R, linkedOk, hi, lo, rate, masterSeekFrame]);
 
-  const loadSample = useCallback(() => {
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-    pendingNameRef.current = "Sample swing (face-on)";
-    resetSession();
-    setError(null);
-    setLoading(true);
-    setAngle("FO");
-    setSrc(SAMPLE_VIDEO_URL);
-  }, []);
-
-  useEffect(() => () => {
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-  }, []);
-
-  const onLoadedMetadata = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const finish = () => {
-      const w = v.videoWidth || 1920;
-      const h = v.videoHeight || 1080;
-      setAspect(w / h);
-      setMeta({ name: pendingNameRef.current, width: w, height: h, duration: v.duration });
-      setLoading(false);
-      v.playbackRate = rate;
-      // Nudge to the first frame so it paints in every browser.
-      if (v.currentTime === 0) v.currentTime = 0.5 / fps;
-    };
-    // Some WebM files (e.g. MediaRecorder output) report Infinity until the end has been seeked.
-    if (!isFinite(v.duration)) {
-      const onDur = () => {
-        if (isFinite(v.duration)) {
-          v.removeEventListener("durationchange", onDur);
-          v.currentTime = 0;
-          finish();
-        }
-      };
-      v.addEventListener("durationchange", onDur);
-      v.currentTime = 1e101;
-      return;
-    }
-    finish();
-  }, [rate, fps]);
-
-  const onVideoError = useCallback(() => {
-    const isSample = src === SAMPLE_VIDEO_URL;
-    setLoading(false);
-    setSrc(null);
-    setMeta(null);
-    setError(
-      isSample
-        ? "The sample video couldn't be loaded. Make sure public/sample-swing.mp4 exists."
-        : "This browser can't play that file. iPhone .mov files recorded in HEVC may not play in Chrome or Firefox. Try Safari, or export as H.264 MP4.",
-    );
-  }, [src]);
-
-  // ── Playback state sync ──────────────────────────────────────────
+  // Keep the reference glued to your video while both play (gentle rate nudging, hard resync if far off).
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("ended", onPause);
-    return () => {
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-      v.removeEventListener("ended", onPause);
-    };
-  }, [src]);
-
-  // Smooth time readout: poll currentTime every animation frame.
-  useEffect(() => {
+    if (!locked || !masterPlaying) return;
+    const lv = lVideo.current;
+    const rv = rVideo.current;
+    if (!lv || !rv) return;
+    const off = offFrames / fps;
     let raf = 0;
     const tick = () => {
-      const v = videoRef.current;
-      if (v) {
-        const t = v.currentTime;
-        setCurrentTime((prev) => (Math.abs(prev - t) > 1e-4 ? t : prev));
+      if (lv.paused !== rv.paused || lv.ended || rv.ended || Math.floor(lv.currentTime * fps + 1e-6) > hi) {
+        lv.pause();
+        rv.pause();
+        return;
       }
+      const err = lv.currentTime + off - rv.currentTime;
+      if (Math.abs(err) > 0.25) rv.currentTime = lv.currentTime + off;
+      else rv.playbackRate = rate * (1 + Math.max(-0.25, Math.min(0.25, err * 3)));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
+    return () => {
+      cancelAnimationFrame(raf);
+      rv.playbackRate = rate;
+    };
+  }, [locked, masterPlaying, offFrames, fps, hi, rate, lVideo, rVideo]);
 
-  const duration = meta?.duration ?? 0;
-  const ready = !!src && !!meta;
+  navL.current = locked ? (t) => masterSeekTime(t) : null;
+  navR.current = locked ? (t) => masterSeekTime(t - offFrames / fps) : null;
 
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v || !ready) return;
-    if (v.paused) {
-      if (v.ended || v.currentTime >= v.duration - 0.01) v.currentTime = 0;
-      v.play().catch(() => undefined);
-    } else {
-      v.pause();
-    }
-  }, [ready]);
-
-  const seek = useCallback(
-    (t: number) => {
-      const v = videoRef.current;
-      if (!v || !ready) return;
-      const clamped = Math.max(0, Math.min(duration, t));
-      v.currentTime = clamped;
-      setCurrentTime(clamped);
-    },
-    [ready, duration],
-  );
-
-  const step = useCallback(
-    (frames: number) => {
-      const v = videoRef.current;
-      if (!v || !ready) return;
-      v.pause();
-      const lastFrame = Math.max(0, Math.floor(duration * fps) - 1);
-      const cur = Math.floor(v.currentTime * fps + 1e-6);
-      const target = Math.max(0, Math.min(lastFrame, cur + frames));
-      // Seek to the middle of the target frame so the decoder lands on it reliably.
-      const t = Math.min(duration - 0.0005, (target + 0.5) / fps);
-      v.currentTime = t;
-      setCurrentTime(t);
-    },
-    [ready, duration, fps],
-  );
-
-  const changeRate = useCallback((r: number) => {
-    setRate(r);
-    if (videoRef.current) videoRef.current.playbackRate = r;
-  }, []);
-
-  // ── Checkpoints ──────────────────────────────────────────────────
-  const setCheckpointAt = useCallback(
-    (k: CheckpointKey) => {
-      const v = videoRef.current;
-      if (!v || !ready) return;
-      const t = v.currentTime;
-      setBookmarks((b) => ({ ...b, [k]: t }));
-    },
-    [ready],
-  );
-
-  const jumpCheckpoint = useCallback(
-    (k: CheckpointKey) => {
-      const t = bookmarks[k];
-      if (t === undefined) return;
-      videoRef.current?.pause();
-      seek(t);
-    },
-    [bookmarks, seek],
-  );
-
-  const clearCheckpoint = useCallback((k: CheckpointKey) => {
-    setBookmarks((b) => {
-      const next = { ...b };
-      delete next[k];
-      return next;
-    });
-  }, []);
-
-  /** One-click: jump if tagged, otherwise tag the current frame. */
-  const checkpointButton = useCallback(
-    (k: CheckpointKey) => {
-      if (bookmarks[k] !== undefined) jumpCheckpoint(k);
-      else setCheckpointAt(k);
-    },
-    [bookmarks, jumpCheckpoint, setCheckpointAt],
-  );
-
-  // ── AI analysis ──────────────────────────────────────────────────
-  const analyze = useCallback(async () => {
-    if (!src || !meta || !isFinite(meta.duration) || meta.duration <= 0) return;
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    videoRef.current?.pause();
-    setPhaseMessage(null);
-    setAnalysis({ status: "loading-model", done: 0, total: 0, message: null });
-    const started = performance.now();
-    try {
-      const track = await analyzeVideo({
-        src,
-        fps,
-        duration: meta.duration,
-        model: poseModel,
-        signal: ac.signal,
-        onModelReady: () => {
-          if (!ac.signal.aborted) setAnalysis((a) => ({ ...a, status: "running" }));
-        },
-        onProgress: (done, total) => {
-          if (!ac.signal.aborted) setAnalysis((a) => ({ ...a, status: "running", done, total }));
-        },
-      });
-      if (ac.signal.aborted) return;
-      const found = detectedCount(track);
-      setPoseTrack(track);
-      setAnalysis({
-        status: "done",
-        done: track.frames.length,
-        total: track.frames.length,
-        message:
-          found === 0
-            ? "No golfer was detected. Make sure the whole body is in frame and reasonably lit."
-            : `Pose found in ${found} of ${track.frames.length} frames (${fps} fps, ${track.delegate}) in ${((performance.now() - started) / 1000).toFixed(1)}s.`,
-      });
-    } catch (err) {
-      if (ac.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {
-        setAnalysis({ status: "idle", done: 0, total: 0, message: "Analysis cancelled." });
-        return;
-      }
-      console.error(err);
-      const offline = typeof navigator !== "undefined" && !navigator.onLine;
-      setAnalysis({
-        status: "error",
-        done: 0,
-        total: 0,
-        message: offline
-          ? "You're offline. The pose model is downloaded from Google's MediaPipe storage the first time; connect and try again."
-          : `Analysis failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    } finally {
-      if (abortRef.current === ac) abortRef.current = null;
-    }
-  }, [src, meta, fps, poseModel]);
-
-  const cancelAnalysis = useCallback(() => abortRef.current?.abort(), []);
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  const autoDetect = useCallback(() => {
-    if (!poseTrack) return;
-    const r = detectPhases(poseTrack, meta ? meta.width / meta.height : 1);
-    if ("error" in r) {
-      setPhaseMessage({ ok: false, text: r.error });
+  const toggleLock = useCallback(() => {
+    if (sync.locked) {
+      setSync((s) => ({ ...s, locked: false }));
       return;
     }
-    const b = r.bookmarks;
-    setBookmarks(b);
-    const tempo = (b.T - b.A) / (b.I - b.T);
-    setPhaseMessage({
-      ok: true,
-      text: `Set A/T/I/F · backswing ${(b.T - b.A).toFixed(2)}s, downswing ${(b.I - b.T).toFixed(2)}s, tempo ${tempo.toFixed(1)} : 1. Check each with Go and re-tag if needed.`,
-    });
-    videoRef.current?.pause();
-    seek(b.A);
-  }, [poseTrack, meta, seek]);
+    const lv = L.videoRef.current;
+    const rv = R.videoRef.current;
+    if (!lv || !rv || !bothReady) return;
+    lv.pause();
+    rv.pause();
+    // Lock at the current alignment.
+    setSync({ locked: true, offset: (R.frameOf(rv.currentTime) - L.frameOf(lv.currentTime)) / fps });
+  }, [sync.locked, L, R, bothReady, fps]);
 
-  // ── Presets ──────────────────────────────────────────────────────
-  const togglePreset = useCallback(
-    (presetId: string) => {
-      const existing = shapesRef.current.find((s) => s.presetId === presetId);
-      checkpoint();
-      if (existing) {
-        setShapes((prev) => prev.filter((s) => s.presetId !== presetId));
-        if (selectedId === existing.id) setSelectedId(null);
-        return;
-      }
-      const def = PRESETS.find((p) => p.id === presetId);
-      if (!def) return;
-      const shape: Shape = {
-        id: newId(),
-        kind: def.kind,
-        color: def.color,
-        points: def.points.map((p) => ({ ...p })),
-        presetId: def.id,
-        label: def.name,
-      };
-      setShapes((prev) => [...prev, shape]);
-      setSelectedId(shape.id);
+  const syncAt = useCallback(
+    (k: "T" | "I") => {
+      const bl = L.bookmarks[k];
+      const br = R.bookmarks[k];
+      if (bl === undefined || br === undefined) return;
+      L.pause();
+      R.pause();
+      const fl = L.frameOf(bl);
+      const fr = R.frameOf(br);
+      setSync({ locked: true, offset: (fr - fl) / fps });
+      L.seekFrame(fl);
+      R.seekFrame(fr);
     },
-    [checkpoint, selectedId],
+    [L, R, fps],
   );
 
+  // Leaving compare mode: stop the reference.
+  const pauseR = R.pause;
+  useEffect(() => {
+    if (!compare) pauseR();
+  }, [compare, pauseR]);
+
+  const changeRate = useCallback((r: number) => setRate(r), []);
+
+  // Per-side transport handlers (routed to the master while locked).
+  const sideHandlers = (k: SideKey) => {
+    const s = sides[k];
+    const shift = k === "R" ? offFrames / fps : 0;
+    return {
+      onTogglePlay: locked ? masterToggle : s.togglePlay,
+      onSeek: locked ? (t: number) => masterSeekTime(t - shift) : s.seek,
+      onStep: locked ? masterStep : s.step,
+    };
+  };
+
   // ── Global keyboard shortcuts ────────────────────────────────────
-  const keyHandlers = useRef({ togglePlay, step, undo, checkpointButton, setCheckpointAt });
-  keyHandlers.current = { togglePlay, step, undo, checkpointButton, setCheckpointAt };
+  const keyHandlers = useRef({ S, locked, masterToggle, masterStep, compare, activate, activeK });
+  keyHandlers.current = { S, locked, masterToggle, masterStep, compare, activate, activeK };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -399,7 +200,7 @@ export default function SwingLab() {
 
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        h.undo();
+        h.S.undo();
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -407,15 +208,22 @@ export default function SwingLab() {
       switch (e.key) {
         case " ":
           e.preventDefault();
-          h.togglePlay();
+          if (h.locked) h.masterToggle();
+          else h.S.togglePlay();
           return;
         case "ArrowLeft":
+        case "ArrowRight": {
           e.preventDefault();
-          h.step(e.shiftKey ? -10 : -1);
+          const n = (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1);
+          if (h.locked) h.masterStep(n);
+          else h.S.step(n);
           return;
-        case "ArrowRight":
-          e.preventDefault();
-          h.step(e.shiftKey ? 10 : 1);
+        }
+        case "Tab":
+          if (h.compare) {
+            e.preventDefault();
+            h.activate(h.activeK === "L" ? "R" : "L");
+          }
           return;
       }
 
@@ -428,8 +236,8 @@ export default function SwingLab() {
       const k = e.key.toUpperCase();
       if (k === "A" || k === "T" || k === "I" || k === "F") {
         e.preventDefault();
-        if (e.shiftKey) h.setCheckpointAt(k);
-        else h.checkpointButton(k);
+        if (e.shiftKey) h.S.setCheckpointAt(k);
+        else h.S.checkpointButton(k);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -437,39 +245,134 @@ export default function SwingLab() {
   }, []);
 
   const headerFileRef = useRef<HTMLInputElement>(null);
+  const sideFileRefs = { L: useRef<HTMLInputElement>(null), R: useRef<HTMLInputElement>(null) };
 
-  // ── Current-frame pose + metrics (pure lookups, no inference) ───
-  const currentPose = poseAt(poseTrack, currentTime);
-  const posesAtBookmarks = useMemo(
-    () => ({
-      A: bookmarks.A !== undefined ? poseAt(poseTrack, bookmarks.A) : null,
-      T: bookmarks.T !== undefined ? poseAt(poseTrack, bookmarks.T) : null,
-      I: bookmarks.I !== undefined ? poseAt(poseTrack, bookmarks.I) : null,
-    }),
-    [poseTrack, bookmarks],
-  );
-  const metrics = useMemo(
-    () =>
-      poseTrack && meta
-        ? computeMetrics({
-            angle,
-            handed,
-            width: meta.width,
-            height: meta.height,
-            cur: currentPose,
-            at: posesAtBookmarks,
-            hasA: bookmarks.A !== undefined,
-          })
-        : [],
-    [poseTrack, meta, angle, handed, currentPose, posesAtBookmarks, bookmarks.A],
-  );
-  const coverage = useMemo(
-    () =>
-      poseTrack
-        ? { detected: detectedCount(poseTrack), total: poseTrack.frames.length, fps: poseTrack.fps, delegate: poseTrack.delegate }
-        : null,
-    [poseTrack],
-  );
+  // Master timeline is expressed in "linked" time starting at the first shared frame.
+  const loT = lo / fps;
+  const masterBookmarks: Bookmarks = {};
+  if (linkedOk) {
+    for (const k of ["A", "T", "I", "F"] as CheckpointKey[]) {
+      const t = L.bookmarks[k];
+      if (t !== undefined) {
+        const f = L.frameOf(t);
+        if (f >= lo && f <= hi) masterBookmarks[k] = t - loT;
+      }
+    }
+  }
+
+  // ── Render helpers ───────────────────────────────────────────────
+  const renderStage = (k: SideKey) => {
+    const s = sides[k];
+    return (
+      <VideoStage
+        videoRef={s.videoRef}
+        src={s.src}
+        aspect={s.aspect}
+        loading={s.loading}
+        error={s.error}
+        onFile={s.loadFile}
+        onLoadSample={s.loadSample}
+        onLoadedMetadata={s.onLoadedMetadata}
+        onVideoError={s.onVideoError}
+        shapes={s.shapes}
+        setShapes={s.setShapes}
+        checkpoint={s.checkpoint}
+        tool={tool}
+        color={color}
+        selectedId={s.selectedId}
+        setSelectedId={s.setSelectedId}
+        pose={s.currentPose}
+        handed={s.handed}
+        showSkeleton={showSkeleton && !!s.poseTrack}
+        flip={compare && s.flip}
+        compact={compare}
+        emptyTitle={compare ? (k === "L" ? "Drop your swing here" : "Drop a reference / pro swing here") : undefined}
+        onActivate={compare ? () => activate(k) : undefined}
+        active={compare && activeK === k}
+      />
+    );
+  };
+
+  const renderSideHeader = (k: SideKey) => {
+    const s = sides[k];
+    const isActive = activeK === k;
+    const accent = k === "L" ? "bg-emerald-400" : "bg-cyan-400";
+    return (
+      <div className="flex min-h-8 items-center gap-2" onPointerDownCapture={() => activate(k)}>
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${accent} ${isActive ? "" : "opacity-40"}`} />
+        <span className={`text-sm font-bold ${isActive ? "text-slate-100" : "text-slate-400"}`}>{SIDE_LABEL[k]}</span>
+        {s.meta && (
+          <span className="min-w-0 truncate text-xs text-slate-500" title={s.meta.name}>
+            {s.meta.name}
+          </span>
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {k === "R" && (
+            <button
+              type="button"
+              disabled={!s.src}
+              onClick={() => s.setFlip(!s.flip)}
+              aria-pressed={s.flip}
+              title="Mirror the reference video (e.g. compare against an opposite-handed golfer). Display only: metrics are unchanged."
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition disabled:opacity-40 ${
+                s.flip ? "bg-cyan-400 text-slate-950" : "border border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-800"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v18M8 7l-5 5 5 5V7zM16 7l5 5-5 5V7z" />
+              </svg>
+              Flip Horizontal
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => sideFileRefs[k].current?.click()}
+            className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-slate-500 hover:bg-slate-800"
+          >
+            {s.src ? "Replace" : "Open"}
+          </button>
+          <input
+            ref={sideFileRefs[k]}
+            type="file"
+            accept={ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) s.loadFile(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const renderSideTransport = (k: SideKey) => {
+    const s = sides[k];
+    const h = sideHandlers(k);
+    return (
+      <TransportControls
+        testId={`transport-${k}`}
+        compact
+        enabled={s.ready}
+        playing={locked ? masterPlaying : s.playing}
+        onTogglePlay={h.onTogglePlay}
+        rate={rate}
+        onRate={changeRate}
+        fps={fps}
+        onFps={setFps}
+        currentTime={s.currentTime}
+        duration={s.duration}
+        onSeek={h.onSeek}
+        onStep={h.onStep}
+        bookmarks={s.bookmarks}
+        onCheckpoint={(c) => {
+          activate(k);
+          s.checkpointButton(c);
+        }}
+      />
+    );
+  };
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-slate-950 text-slate-100">
@@ -490,17 +393,38 @@ export default function SwingLab() {
           </div>
         </div>
 
-        <AngleToggle value={angle} onChange={setAngle} />
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-xl border border-slate-800 bg-slate-900/80 p-1" role="group" aria-label="View mode">
+            {([
+              ["single", "Single Swing"],
+              ["compare", "Compare (Split-Screen)"],
+            ] as [Mode, string][]).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={mode === m}
+                onClick={() => setMode(m)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  mode === m ? "bg-slate-100 text-slate-900" : "text-slate-400 hover:text-slate-100"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <AngleToggle value={angle} onChange={setAngle} />
+        </div>
 
         <div className="flex items-center justify-end gap-2">
-          {meta && (
-            <span className="hidden max-w-[16rem] truncate text-xs text-slate-500 xl:inline" title={meta.name}>
-              {meta.name}
+          {!compare && L.meta && (
+            <span className="hidden max-w-[16rem] truncate text-xs text-slate-500 xl:inline" title={L.meta.name}>
+              {L.meta.name}
             </span>
           )}
           <button
             type="button"
-            onClick={loadSample}
+            onClick={S.loadSample}
+            title={compare ? `Load the sample into ${SIDE_LABEL[activeK]}` : undefined}
             className="hidden rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 md:block"
           >
             Sample
@@ -508,6 +432,7 @@ export default function SwingLab() {
           <button
             type="button"
             onClick={() => headerFileRef.current?.click()}
+            title={compare ? `Open into ${SIDE_LABEL[activeK]}` : undefined}
             className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400"
           >
             Open video
@@ -515,11 +440,11 @@ export default function SwingLab() {
           <input
             ref={headerFileRef}
             type="file"
-            accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v"
+            accept={ACCEPT}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) loadFile(f);
+              if (f) S.loadFile(f);
               e.target.value = "";
             }}
           />
@@ -529,35 +454,47 @@ export default function SwingLab() {
       <div className="flex min-h-0 flex-1">
         <Sidebar
           angle={angle}
-          shapes={shapes}
-          onTogglePreset={togglePreset}
-          bookmarks={bookmarks}
-          onSetCheckpoint={setCheckpointAt}
-          onJumpCheckpoint={jumpCheckpoint}
-          onClearCheckpoint={clearCheckpoint}
-          meta={meta}
+          shapes={S.shapes}
+          onTogglePreset={S.togglePreset}
+          bookmarks={S.bookmarks}
+          onSetCheckpoint={S.setCheckpointAt}
+          onJumpCheckpoint={S.jumpCheckpoint}
+          onClearCheckpoint={S.clearCheckpoint}
+          meta={S.meta}
           fps={fps}
-          hasVideo={ready}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          hasVideo={S.ready}
+          selectedId={S.selectedId}
+          onSelect={S.setSelectedId}
+          sideLabel={compare ? SIDE_LABEL[activeK] : undefined}
+          topPanel={
+            compare ? (
+              <ComparePanel
+                angle={angle}
+                active={activeK}
+                onActive={activate}
+                you={{ numbers: L.numbers, bookmarks: L.bookmarks, analyzed: !!L.poseTrack, hasVideo: L.ready }}
+                pro={{ numbers: R.numbers, bookmarks: R.bookmarks, analyzed: !!R.poseTrack, hasVideo: R.ready }}
+              />
+            ) : undefined
+          }
           aiPanel={
             <PosePanel
               angle={angle}
-              hasVideo={ready}
-              analysis={analysis}
-              coverage={coverage}
+              hasVideo={S.ready}
+              analysis={S.analysis}
+              coverage={S.coverage}
               model={poseModel}
               onModel={setPoseModel}
-              onAnalyze={analyze}
-              onCancel={cancelAnalysis}
+              onAnalyze={S.analyze}
+              onCancel={S.cancelAnalysis}
               showSkeleton={showSkeleton}
               onShowSkeleton={setShowSkeleton}
-              handed={handed}
-              onHanded={setHanded}
-              onAutoDetect={autoDetect}
-              phaseMessage={phaseMessage}
-              metrics={metrics}
-              poseVisible={!!currentPose}
+              handed={S.handed}
+              onHanded={S.setHanded}
+              onAutoDetect={S.autoDetect}
+              phaseMessage={S.phaseMessage}
+              metrics={S.metrics}
+              poseVisible={!!S.currentPose}
             />
           }
         />
@@ -569,55 +506,74 @@ export default function SwingLab() {
             color={color}
             onColor={(c) => {
               setColor(c);
-              // Recolor the selected shape too.
-              if (selectedId) {
-                checkpoint();
-                setShapes((prev) => prev.map((s) => (s.id === selectedId ? { ...s, color: c } : s)));
-              }
+              S.recolorSelected(c);
             }}
-            canUndo={historyLen > 0}
-            onUndo={undo}
-            onClear={clearAll}
-            hasShapes={shapes.length > 0}
+            canUndo={S.canUndo}
+            onUndo={S.undo}
+            onClear={S.clearAll}
+            hasShapes={S.shapes.length > 0}
           />
 
-          <VideoStage
-            videoRef={videoRef}
-            src={src}
-            aspect={aspect}
-            loading={loading}
-            error={error}
-            onFile={loadFile}
-            onLoadSample={loadSample}
-            onLoadedMetadata={onLoadedMetadata}
-            onVideoError={onVideoError}
-            shapes={shapes}
-            setShapes={setShapes}
-            checkpoint={checkpoint}
-            tool={tool}
-            color={color}
-            selectedId={selectedId}
-            setSelectedId={setSelectedId}
-            pose={currentPose}
-            handed={handed}
-            showSkeleton={showSkeleton && !!poseTrack}
-          />
+          {/* Stages. Your Swing keeps the same tree position in both modes so the video isn't reloaded. */}
+          <div className="flex min-h-0 flex-1 gap-3">
+            <section className="flex min-w-0 flex-1 flex-col gap-2" data-testid="side-L">
+              {compare ? renderSideHeader("L") : null}
+              {renderStage("L")}
+              {compare ? renderSideTransport("L") : null}
+            </section>
+            {compare && (
+              <section className="flex min-w-0 flex-1 flex-col gap-2" data-testid="side-R">
+                {renderSideHeader("R")}
+                {renderStage("R")}
+                {renderSideTransport("R")}
+              </section>
+            )}
+          </div>
 
-          <TransportControls
-            enabled={ready}
-            playing={playing}
-            onTogglePlay={togglePlay}
-            rate={rate}
-            onRate={changeRate}
-            fps={fps}
-            onFps={setFps}
-            currentTime={currentTime}
-            duration={duration}
-            onSeek={seek}
-            onStep={step}
-            bookmarks={bookmarks}
-            onCheckpoint={checkpointButton}
-          />
+          {compare ? (
+            <SyncBar
+              locked={locked}
+              canLock={bothReady}
+              onToggleLock={toggleLock}
+              onSyncAt={syncAt}
+              canSyncAt={{
+                T: bothReady && L.bookmarks.T !== undefined && R.bookmarks.T !== undefined,
+                I: bothReady && L.bookmarks.I !== undefined && R.bookmarks.I !== undefined,
+              }}
+              offsetFrames={locked ? offFrames : null}
+              rate={rate}
+              onRate={changeRate}
+              fps={fps}
+              onFps={setFps}
+              playing={masterPlaying}
+              onTogglePlay={masterToggle}
+              currentTime={Math.max(0, L.currentTime - loT)}
+              duration={linkedOk ? (hi - lo + 1) / fps : 0}
+              onSeek={(t) => masterSeekTime(t + loT)}
+              onStep={masterStep}
+              bookmarks={masterBookmarks}
+              onCheckpoint={(k) => {
+                const t = L.bookmarks[k];
+                if (t !== undefined) masterSeekTime(t);
+              }}
+            />
+          ) : (
+            <TransportControls
+              enabled={L.ready}
+              playing={L.playing}
+              onTogglePlay={L.togglePlay}
+              rate={rate}
+              onRate={changeRate}
+              fps={fps}
+              onFps={setFps}
+              currentTime={L.currentTime}
+              duration={L.duration}
+              onSeek={L.seek}
+              onStep={L.step}
+              bookmarks={L.bookmarks}
+              onCheckpoint={L.checkpointButton}
+            />
+          )}
         </main>
       </div>
     </div>

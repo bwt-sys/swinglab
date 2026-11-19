@@ -144,7 +144,23 @@ export interface AnalyzeOptions {
   signal?: AbortSignal;
 }
 
-export async function analyzeVideo(opts: AnalyzeOptions): Promise<PoseTrack> {
+/**
+ * Runs are serialized: VIDEO mode smooths landmarks across consecutive calls, so interleaving two
+ * videos (compare mode) through one landmarker would blend their poses.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+export function analyzeVideo(opts: AnalyzeOptions): Promise<PoseTrack> {
+  const run = queue.then(
+    () => runAnalysis(opts),
+    () => runAnalysis(opts),
+  );
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
+  if (opts.signal?.aborted) throw new DOMException("Analysis cancelled", "AbortError");
   const { lm: landmarker, delegate } = await loadPoseLandmarker(opts.model);
   opts.onModelReady?.(delegate);
 

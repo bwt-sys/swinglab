@@ -18,6 +18,13 @@ interface Props {
   onStep: (frames: number) => void;
   bookmarks: Bookmarks;
   onCheckpoint: (key: CheckpointKey) => void;
+  /** Split-screen side panel: no speed / fps selectors, tighter padding. */
+  compact?: boolean;
+  /** Checkpoint buttons only jump (no tagging); unset ones are disabled. */
+  jumpOnly?: boolean;
+  /** Extra controls rendered at the start of the controls row. */
+  leading?: React.ReactNode;
+  testId?: string;
 }
 
 export function formatTime(t: number): string {
@@ -56,7 +63,10 @@ export default function TransportControls(p: Props) {
   };
 
   return (
-    <div className={`rounded-2xl border border-slate-800 bg-slate-900/70 px-4 pb-3 pt-4 ${p.enabled ? "" : "opacity-50"}`}>
+    <div
+      data-testid={p.testId}
+      className={`rounded-2xl border border-slate-800 bg-slate-900/70 ${p.compact ? "px-3 pb-2 pt-2" : "px-4 pb-3 pt-4"} ${p.enabled ? "" : "opacity-50"}`}
+    >
       {/* Timeline */}
       <div className="relative">
         {/* Checkpoint markers */}
@@ -124,7 +134,8 @@ export default function TransportControls(p: Props) {
       </div>
 
       {/* Controls row */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className={`mt-2 flex flex-wrap items-center ${p.compact ? "gap-x-2 gap-y-1" : "gap-x-4 gap-y-2"}`}>
+        {p.leading}
         <div className="flex items-center gap-1">
           <IconButton label="Step back 1 frame (←)" disabled={!p.enabled} onClick={() => p.onStep(-1)}>
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
@@ -156,15 +167,17 @@ export default function TransportControls(p: Props) {
           </IconButton>
         </div>
 
-        <div className="font-mono text-sm tabular-nums text-slate-300" data-testid="time-readout">
+        <div className={`font-mono tabular-nums text-slate-300 ${p.compact ? "text-xs" : "text-sm"}`} data-testid="time-readout">
           {formatTime(p.currentTime)} <span className="text-slate-600">/</span> {formatTime(p.duration)}
-          <span className="ml-3 text-slate-500">
+          {p.compact && <br />}
+          <span className={p.compact ? "text-slate-500" : "ml-3 text-slate-500"}>
             Frame <span className="text-slate-200">{frame}</span> / {totalFrames}
           </span>
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
           {/* Speed */}
+          {!p.compact && (
           <div className="flex items-center gap-1 rounded-lg bg-slate-800/80 p-1" role="group" aria-label="Playback speed">
             {PLAYBACK_RATES.map((r) => (
               <button
@@ -179,8 +192,10 @@ export default function TransportControls(p: Props) {
               </button>
             ))}
           </div>
+          )}
 
           {/* FPS */}
+          {!p.compact && (
           <div className="flex items-center gap-1 rounded-lg bg-slate-800/80 p-1" role="group" aria-label="Frame rate for stepping">
             {([30, 60] as Fps[]).map((f) => (
               <button
@@ -195,6 +210,7 @@ export default function TransportControls(p: Props) {
               </button>
             ))}
           </div>
+          )}
 
           {/* Checkpoints */}
           <div className="flex items-center gap-1" role="group" aria-label="Swing checkpoints">
@@ -204,10 +220,10 @@ export default function TransportControls(p: Props) {
                 <button
                   key={c.key}
                   type="button"
-                  disabled={!p.enabled}
+                  disabled={!p.enabled || (p.jumpOnly && !set)}
                   onClick={() => p.onCheckpoint(c.key)}
-                  title={set ? `Jump to ${c.name} (${c.key})` : `Tag ${c.name} at current frame (${c.key})`}
-                  className="h-8 w-8 rounded-lg border text-xs font-bold transition disabled:cursor-not-allowed"
+                  title={set ? `Jump to ${c.name} (${c.key})` : p.jumpOnly ? `${c.name} not tagged` : `Tag ${c.name} at current frame (${c.key})`}
+                  className={`${p.compact ? "h-7 w-7" : "h-8 w-8"} rounded-lg border text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50`}
                   style={
                     set
                       ? { background: c.color, borderColor: c.color, color: "#020617" }
