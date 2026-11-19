@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clamp01, distPx, hitHandle, hitShape, newId } from "@/lib/geometry";
-import { renderScene, simplifyPath } from "@/lib/render";
+import { renderScene, simplifyPath, TOUCH_GRIP_RADIUS } from "@/lib/render";
 import type { Point, Shape, Tool } from "@/lib/types";
 
 interface Props {
@@ -42,6 +42,12 @@ export default function TelestratorCanvas({
   const [angleClicks, setAngleClicks] = useState<Point[]>([]);
   const [hoverHandle, setHoverHandle] = useState<{ shapeId: string; index: number } | null>(null);
   const [cursor, setCursor] = useState("crosshair");
+  /** True after a touch interaction (or on coarse-pointer devices): bigger targets + grip rings. */
+  const [touchMode, setTouchMode] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches) setTouchMode(true);
+  }, []);
 
   // ── Rendering ────────────────────────────────────────────────────
   useEffect(() => {
@@ -62,8 +68,9 @@ export default function TelestratorCanvas({
       selectedId,
       hoverHandle,
       showHandles: tool === "move",
+      touch: touchMode,
     });
-  }, [shapes, draft, width, height, selectedId, hoverHandle, tool]);
+  }, [shapes, draft, width, height, selectedId, hoverHandle, tool, touchMode]);
 
   // Cancel any in-progress angle when switching tools.
   useEffect(() => {
@@ -102,13 +109,23 @@ export default function TelestratorCanvas({
 
   // ── Pointer handling ─────────────────────────────────────────────
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0) return;
+    // Primary button / first finger only: a second finger must not start a parallel drag.
+    if (e.button !== 0 || !e.isPrimary) return;
+    e.preventDefault();
+    const isTouch = e.pointerType === "touch" || e.pointerType === "pen";
+    if (isTouch !== touchMode && e.pointerType !== "pen") setTouchMode(isTouch);
     const p = toNorm(e);
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer already gone (e.g. lifted instantly) — the drag still works without capture.
+    }
 
     // Handles are draggable from any tool (unless an angle is mid-construction).
+    // Touch: 20px radius = 40px finger target (matches the grip ring); pen 16px; mouse 12px.
     if (angleClicks.length === 0) {
-      const hh = hitHandle(shapes, p, width, height, e.pointerType === "touch" ? 20 : 12);
+      const radius = e.pointerType === "touch" ? TOUCH_GRIP_RADIUS : e.pointerType === "pen" ? 16 : 12;
+      const hh = hitHandle(shapes, p, width, height, radius);
       if (hh) {
         dragRef.current = { type: "handle", shapeId: hh.shapeId, index: hh.index, moved: false };
         setSelectedId(hh.shapeId);
@@ -119,7 +136,7 @@ export default function TelestratorCanvas({
 
     switch (tool) {
       case "move": {
-        const id = hitShape(shapes, p, width, height);
+        const id = hitShape(shapes, p, width, height, e.pointerType === "touch" ? 16 : 8);
         setSelectedId(id);
         if (id) {
           const s = shapes.find((x) => x.id === id)!;
@@ -158,6 +175,7 @@ export default function TelestratorCanvas({
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!e.isPrimary) return;
     const p = toNorm(e);
     const drag = dragRef.current;
 
@@ -206,8 +224,8 @@ export default function TelestratorCanvas({
       setDraft({ id: "angle-draft", kind: "angle", color, points: [...angleClicks, p] });
     }
 
-    // Hover feedback.
-    if (angleClicks.length === 0) {
+    // Hover feedback (mouse / hovering stylus only — touch has no hover).
+    if (angleClicks.length === 0 && e.pointerType !== "touch") {
       const hh = hitHandle(shapes, p, width, height);
       setHoverHandle(hh);
       if (hh) setCursor("grab");
@@ -216,7 +234,19 @@ export default function TelestratorCanvas({
     }
   };
 
+  /** The OS took the pointer (palm rejection, system gesture, incoming call): drop any half-drawn shape. */
+  const onPointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!e.isPrimary) return;
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    if (drag?.type === "draw") setDraft(null);
+    setHoverHandle(null);
+    setCursor(tool === "move" ? "move" : "crosshair");
+  };
+
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!e.isPrimary) return;
     const drag = dragRef.current;
     dragRef.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
@@ -250,11 +280,13 @@ export default function TelestratorCanvas({
       ref={canvasRef}
       data-testid="telestrator"
       className="absolute inset-0 h-full w-full touch-none select-none"
-      style={{ cursor }}
+      // touch-action: none stops iOS/Android from scrolling or pinch-zooming the page while drawing.
+      style={{ cursor, touchAction: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onContextMenu={(e) => e.preventDefault()}
       onPointerLeave={onPointerLeave}
     />
   );

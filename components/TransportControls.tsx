@@ -41,7 +41,7 @@ function IconButton(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { lab
       type="button"
       title={label}
       aria-label={label}
-      className={`flex h-9 w-9 items-center justify-center rounded-lg text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+      className={`flex h-9 w-9 items-center justify-center rounded-lg text-slate-200 max-sm:h-11 max-sm:w-11 pointer-coarse:h-11 pointer-coarse:w-11 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
       {...rest}
     />
   );
@@ -97,7 +97,8 @@ export default function TransportControls(p: Props) {
           aria-valuenow={frame}
           tabIndex={0}
           data-testid="timeline"
-          className="group relative h-7 cursor-pointer touch-none select-none"
+          className="group relative h-7 cursor-pointer touch-none select-none max-sm:h-10 pointer-coarse:h-10"
+          style={{ touchAction: "none" }}
           onPointerDown={(e) => {
             if (!p.enabled) return;
             scrubbing.current = true;
@@ -108,6 +109,9 @@ export default function TransportControls(p: Props) {
           onPointerUp={(e) => {
             scrubbing.current = false;
             if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+          }}
+          onPointerCancel={() => {
+            scrubbing.current = false;
           }}
         >
           <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-slate-700" />
@@ -127,7 +131,7 @@ export default function TransportControls(p: Props) {
             );
           })}
           <div
-            className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-emerald-400 shadow-lg shadow-emerald-500/40 transition-transform group-hover:scale-110"
+            className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-emerald-400 shadow-lg shadow-emerald-500/40 transition-transform group-hover:scale-110 max-sm:h-6 max-sm:w-6 pointer-coarse:h-6 pointer-coarse:w-6"
             style={{ left: `${pct}%` }}
           />
         </div>
@@ -148,7 +152,7 @@ export default function TransportControls(p: Props) {
             onClick={p.onTogglePlay}
             aria-label={p.playing ? "Pause (Space)" : "Play (Space)"}
             title={p.playing ? "Pause (Space)" : "Play (Space)"}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 max-sm:h-12 max-sm:w-12 pointer-coarse:h-13 pointer-coarse:w-13 text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed"
           >
             {p.playing ? (
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
@@ -184,7 +188,7 @@ export default function TransportControls(p: Props) {
                 key={r}
                 type="button"
                 onClick={() => p.onRate(r)}
-                className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+                className={`rounded-md px-2 py-1 text-xs font-semibold transition pointer-coarse:px-2.5 pointer-coarse:py-2 ${
                   p.rate === r ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:text-slate-100"
                 }`}
               >
@@ -202,7 +206,7 @@ export default function TransportControls(p: Props) {
                 key={f}
                 type="button"
                 onClick={() => p.onFps(f)}
-                className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+                className={`rounded-md px-2 py-1 text-xs font-semibold transition pointer-coarse:px-2.5 pointer-coarse:py-2 ${
                   p.fps === f ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:text-slate-100"
                 }`}
               >
@@ -223,7 +227,7 @@ export default function TransportControls(p: Props) {
                   disabled={!p.enabled || (p.jumpOnly && !set)}
                   onClick={() => p.onCheckpoint(c.key)}
                   title={set ? `Jump to ${c.name} (${c.key})` : p.jumpOnly ? `${c.name} not tagged` : `Tag ${c.name} at current frame (${c.key})`}
-                  className={`${p.compact ? "h-7 w-7" : "h-8 w-8"} rounded-lg border text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50`}
+                  className={`${p.compact ? "h-7 w-7" : "h-8 w-8"} rounded-lg border text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:h-10 max-sm:w-10 pointer-coarse:h-10 pointer-coarse:w-10`}
                   style={
                     set
                       ? { background: c.color, borderColor: c.color, color: "#020617" }

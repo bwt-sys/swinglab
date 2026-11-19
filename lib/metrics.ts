@@ -128,26 +128,33 @@ export function shoulderTilt(f: PoseFrame | null, W: number, H: number, s: { lea
   return deg(Math.atan2(l.y - t.y, Math.abs(l.x - t.x)));
 }
 
-/** Heading of the shoulder line in the horizontal (x–z) plane using 3D world landmarks. */
-function shoulderHeading(f: PoseFrame | null, s: { lead: Side; trail: Side }): number | null {
+/** Heading of the lead→trail segment in the horizontal (x–z) plane using 3D world landmarks. */
+function heading(f: PoseFrame | null, lead: number, trail: number): number | null {
   const w = f?.world;
-  const vl = f?.lm[s.lead.shoulder];
-  const vt = f?.lm[s.trail.shoulder];
+  const vl = f?.lm[lead];
+  const vt = f?.lm[trail];
   if (!w || !vl || !vt || vl.v < MIN_VIS * 0.5 || vt.v < MIN_VIS * 0.5) return null;
-  const a = w[s.lead.shoulder];
-  const b = w[s.trail.shoulder];
+  const a = w[lead];
+  const b = w[trail];
   if (!a || !b) return null;
   return Math.atan2(a.z - b.z, a.x - b.x);
 }
 
-/** Estimated shoulder rotation relative to a reference frame (Address), 0–180°. */
-export function shoulderTurn(f: PoseFrame | null, ref: PoseFrame | null, s: { lead: Side; trail: Side }) {
-  const a = shoulderHeading(f, s);
-  const b = shoulderHeading(ref, s);
+function turnBetween(a: number | null, b: number | null): number | null {
   if (a === null || b === null) return null;
   let d = Math.abs(a - b);
   if (d > Math.PI) d = 2 * Math.PI - d;
   return deg(d);
+}
+
+/** Estimated shoulder rotation relative to a reference frame (Address), 0–180°. */
+export function shoulderTurn(f: PoseFrame | null, ref: PoseFrame | null, s: { lead: Side; trail: Side }) {
+  return turnBetween(heading(f, s.lead.shoulder, s.trail.shoulder), heading(ref, s.lead.shoulder, s.trail.shoulder));
+}
+
+/** Estimated pelvis rotation relative to a reference frame (Address), 0–180°. */
+export function hipTurn(f: PoseFrame | null, ref: PoseFrame | null, s: { lead: Side; trail: Side }) {
+  return turnBetween(heading(f, s.lead.hip, s.trail.hip), heading(ref, s.lead.hip, s.trail.hip));
 }
 
 export function leadKneeAngle(f: PoseFrame | null, W: number, H: number, s: Side): number | null {
@@ -189,6 +196,9 @@ export interface KeyNumbers {
   hipT: number | null;
   hipI: number | null;
   tiltI: number | null;
+  /** Estimated pelvis rotation vs Address (degrees, from 3D world landmarks; approximate). */
+  hipTurnT: number | null;
+  hipTurnI: number | null;
 }
 
 /**
@@ -223,6 +233,8 @@ export function keyNumbers(m: Omit<MetricInput, "hasA">): KeyNumbers {
     hipT: along(hipMid(at.T, W, H), hpA),
     hipI: along(hipMid(at.I, W, H), hpA),
     tiltI: shoulderTilt(at.I, W, H, sides),
+    hipTurnT: A ? hipTurn(at.T, A, sides) : null,
+    hipTurnI: A ? hipTurn(at.I, A, sides) : null,
   };
 }
 

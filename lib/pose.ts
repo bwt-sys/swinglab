@@ -166,7 +166,12 @@ async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
 
   const video = document.createElement("video");
   video.muted = true;
+  video.defaultMuted = true;
   video.playsInline = true;
+  // Attribute forms too: older iOS Safari only honours the attributes.
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
   video.preload = "auto";
   video.crossOrigin = "anonymous";
   video.src = opts.src;

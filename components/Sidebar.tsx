@@ -26,6 +26,9 @@ interface Props {
   topPanel?: React.ReactNode;
   /** Compare mode: which video the per-video sections below refer to. */
   sideLabel?: string;
+  /** Below the lg breakpoint the sidebar is an off-canvas drawer. */
+  drawerOpen?: boolean;
+  onCloseDrawer?: () => void;
 }
 
 function describeShape(s: Shape, w: number, h: number): { name: string; value: string } {
@@ -62,10 +65,38 @@ export default function Sidebar(p: Props) {
   const total = A !== undefined && F !== undefined && F > A ? F - A : null;
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-r border-slate-800 bg-slate-950/60">
+    <>
+    {/* Drawer backdrop (mobile / tablet only) */}
+    <div
+      aria-hidden
+      onClick={p.onCloseDrawer}
+      className={`fixed inset-0 z-30 bg-slate-950/70 backdrop-blur-sm transition-opacity lg:hidden ${
+        p.drawerOpen ? "opacity-100" : "pointer-events-none opacity-0"
+      }`}
+    />
+    <aside
+      data-testid="sidebar"
+      aria-label="Analysis panel"
+      className={`fixed inset-y-0 left-0 z-40 flex w-[min(22rem,88vw)] flex-col overflow-y-auto overscroll-contain border-r border-slate-800 bg-slate-950 shadow-2xl shadow-black max-lg:transition-transform max-lg:duration-200 lg:static lg:z-auto lg:w-80 lg:shrink-0 lg:translate-x-0 lg:bg-slate-950/60 lg:shadow-none ${
+        p.drawerOpen ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-800 bg-slate-950/95 px-4 py-2 backdrop-blur lg:hidden">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Analysis</span>
+        <button
+          type="button"
+          onClick={p.onCloseDrawer}
+          aria-label="Close panel"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800"
+        >
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
       {p.topPanel}
       {p.sideLabel && (
-        <div className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 backdrop-blur">
+        <div className="sticky top-[57px] z-10 border-b lg:top-0 border-slate-800 bg-slate-950/95 px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 backdrop-blur">
           Below: {p.sideLabel}
         </div>
       )}
@@ -250,5 +281,6 @@ export default function Sidebar(p: Props) {
         </dl>
       </Section>
     </aside>
+    </>
   );
 }

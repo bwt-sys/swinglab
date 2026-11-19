@@ -33,7 +33,11 @@ export default function AngleToggle({ value, onChange }: { value: CameraAngle; o
               active ? "text-slate-950" : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            {o.label} <span className={active ? "text-slate-900/70" : "text-slate-500"}>({o.short})</span>
+            <span className="hidden sm:inline">
+              {o.label} <span className={active ? "text-slate-900/70" : "text-slate-500"}>({o.short})</span>
+            </span>
+            {/* Phones: short label only, so the two halves never overlap */}
+            <span className="sm:hidden">{o.id === "DTL" ? "DTL" : "Face-On"}</span>
           </button>
         );
       })}

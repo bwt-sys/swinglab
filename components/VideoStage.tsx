@@ -58,6 +58,18 @@ export default function VideoStage(props: Props) {
     return () => ro.disconnect();
   }, []);
 
+  // iOS Safari: React sets `muted` only as a property, and old WebKit needs `webkit-playsinline`.
+  // Set the attributes explicitly so phone videos play and scrub inline instead of going fullscreen.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = true;
+    v.defaultMuted = true;
+    v.setAttribute("muted", "");
+    v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
+  });
+
   // Contain-fit: largest box with the video's aspect ratio that fits the stage.
   const pad = props.compact ? 12 : 24;
   const availW = Math.max(0, stage.w - pad * 2);
@@ -107,8 +119,8 @@ export default function VideoStage(props: Props) {
 
       {src && boxW > 0 && boxH > 0 && (
         <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-lg bg-black shadow-2xl shadow-black/60 ring-1 ring-slate-700"
-          style={{ width: boxW, height: boxH }}
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none overflow-hidden rounded-lg bg-black shadow-2xl shadow-black/60 ring-1 ring-slate-700"
+          style={{ width: boxW, height: boxH, WebkitTouchCallout: "none" }}
         >
           <video
             ref={videoRef}
@@ -118,6 +130,8 @@ export default function VideoStage(props: Props) {
             playsInline
             preload="auto"
             muted
+            controls={false}
+            disablePictureInPicture
             onLoadedMetadata={props.onLoadedMetadata}
             onError={props.onVideoError}
           />

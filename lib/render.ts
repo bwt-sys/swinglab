@@ -9,7 +9,15 @@ export interface RenderOptions {
   selectedId: string | null;
   hoverHandle: { shapeId: string; index: number } | null;
   showHandles: boolean;
+  /**
+   * Touch mode: bigger handle dots plus translucent grip rings around the endpoints of the selected
+   * shape, so a fingertip can grab the ring without hiding the point being placed.
+   */
+  touch?: boolean;
 }
+
+/** Radius (CSS px) of the touch grip ring; also the touch hit radius, so the ring shows what's grabbable. */
+export const TOUCH_GRIP_RADIUS = 20;
 
 const FONT = "600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
 
@@ -117,15 +125,32 @@ function drawHandles(
   w: number,
   h: number,
   hover: { shapeId: string; index: number } | null,
+  touch = false,
+  grips = false,
 ) {
   if (!hasHandles(s)) return;
   ctx.save();
   ctx.shadowBlur = 0;
+  if (grips) {
+    // Translucent grip rings: a finger-sized target whose centre stays visible.
+    s.points.forEach((p) => {
+      const q = toPx(p, w, h);
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, TOUCH_GRIP_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(248, 250, 252, 0.10)";
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = s.color;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+  }
   s.points.forEach((p, i) => {
     const q = toPx(p, w, h);
     const isHover = hover && hover.shapeId === s.id && hover.index === i;
     ctx.beginPath();
-    ctx.arc(q.x, q.y, isHover ? 8 : 5.5, 0, Math.PI * 2);
+    ctx.arc(q.x, q.y, isHover ? 8 : touch ? 6.5 : 5.5, 0, Math.PI * 2);
     ctx.fillStyle = isHover ? s.color : "rgba(2, 6, 23, 0.9)";
     ctx.fill();
     ctx.lineWidth = 2;
@@ -169,7 +194,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, shapes: Shape[], opts
     ctx.restore();
 
     if (opts.showHandles || selected || s.presetId || s === opts.draft) {
-      drawHandles(ctx, s, w, h, opts.hoverHandle);
+      drawHandles(ctx, s, w, h, opts.hoverHandle, !!opts.touch, !!opts.touch && (selected || s === opts.draft));
     }
   }
 }

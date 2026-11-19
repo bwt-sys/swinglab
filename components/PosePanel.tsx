@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Handed, MetricRow } from "@/lib/metrics";
 import type { PoseModel } from "@/lib/pose";
 import type { CameraAngle } from "@/lib/types";
@@ -30,7 +31,13 @@ interface Props {
   phaseMessage: { ok: boolean; text: string } | null;
   metrics: MetricRow[];
   poseVisible: boolean;
+  /** Coach Tips tab content, shown alongside Live metrics. */
+  coach: React.ReactNode;
+  /** Number of flagged tips (badge on the tab). */
+  coachCount: number;
 }
+
+type Tab = "metrics" | "coach";
 
 function Seg<T extends string>({ value, options, onChange, disabled }: { value: T; options: [T, string][]; onChange: (v: T) => void; disabled?: boolean }) {
   return (
@@ -62,6 +69,7 @@ export default function PosePanel(p: Props) {
   const busy = p.analysis.status === "loading-model" || p.analysis.status === "running";
   const pct = p.analysis.total ? (p.analysis.done / p.analysis.total) * 100 : 0;
   const hasTrack = !!p.coverage;
+  const [tab, setTab] = useState<Tab>("metrics");
 
   return (
     <>
@@ -160,17 +168,42 @@ export default function PosePanel(p: Props) {
         </div>
       </Section>
 
-      <Section
-        title={p.angle === "DTL" ? "Live metrics · DTL" : "Live metrics · Face-on"}
-        aside={
-          hasTrack ? (
+      <section className="border-b border-slate-800/80 px-5 py-4 last:border-b-0">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex rounded-lg bg-slate-800/80 p-0.5" role="tablist" aria-label="Metrics or coach tips">
+            {([
+              ["metrics", p.angle === "DTL" ? "Live metrics · DTL" : "Live metrics · FO"],
+              ["coach", "Coach Tips"],
+            ] as [Tab, string][]).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={tab === k}
+                data-testid={`tab-${k}`}
+                onClick={() => setTab(k)}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition pointer-coarse:py-2 ${
+                  tab === k ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:text-slate-100"
+                }`}
+              >
+                {label}
+                {k === "coach" && p.coachCount > 0 && (
+                  <span className={`rounded-full px-1.5 text-[10px] font-bold ${tab === k ? "bg-amber-500 text-slate-950" : "bg-amber-400/20 text-amber-300"}`}>
+                    {p.coachCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {tab === "metrics" && hasTrack && (
             <span className={`text-[10px] font-semibold ${p.poseVisible ? "text-emerald-400" : "text-amber-300"}`}>
-              {p.poseVisible ? "● Pose found" : "○ No pose this frame"}
+              {p.poseVisible ? "● Pose" : "○ No pose"}
             </span>
-          ) : undefined
-        }
-      >
-        {!hasTrack ? (
+          )}
+        </div>
+        {tab === "coach" ? (
+          p.coach
+        ) : !hasTrack ? (
           <p className="text-xs text-slate-500">Run Analyze Swing to see angle-specific metrics for every frame.</p>
         ) : (
           <ul className="flex flex-col gap-1.5">
@@ -185,7 +218,7 @@ export default function PosePanel(p: Props) {
             ))}
           </ul>
         )}
-      </Section>
+      </section>
     </>
   );
 }

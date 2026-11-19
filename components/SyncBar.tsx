@@ -35,7 +35,7 @@ function Seg<T extends string | number>({ value, options, onChange, label }: { v
           key={String(v)}
           type="button"
           onClick={() => onChange(v)}
-          className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+          className={`rounded-md px-2 py-1 text-xs font-semibold transition pointer-coarse:px-2.5 pointer-coarse:py-2 ${
             value === v ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:text-slate-100"
           }`}
         >
