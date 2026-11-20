@@ -6,10 +6,10 @@ import { SAMPLE_VIDEO_URL, SUPPORTED_EXTENSIONS } from "@/lib/constants";
 import { newId } from "@/lib/geometry";
 import { computeMetrics, keyNumbers, type Handed } from "@/lib/metrics";
 import { detectPhases } from "@/lib/phases";
-import { analyzeVideo, detectedCount, poseAt, type PoseModel, type PoseTrack } from "@/lib/pose";
+import { analyzeVideo, detectedCount, poseAt, scanFrame, type FrameScan, type PoseModel, type PoseTrack } from "@/lib/pose";
 import { PRESETS } from "@/lib/presets";
 import { fitPreset } from "@/lib/presetFit";
-import type { Bookmarks, CameraAngle, CheckpointKey, Fps, Shape, VideoMeta } from "@/lib/types";
+import type { Bookmarks, CameraAngle, CheckpointKey, Fps, Point, Shape, VideoMeta } from "@/lib/types";
 
 const MAX_HISTORY = 100;
 
@@ -46,6 +46,8 @@ export function useSwingSide(o: SideOptions) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flip, setFlip] = useState(false);
+  /** Address-frame scans (outline + pixels) for preset fitting, per video + time. */
+  const scanCache = useRef(new Map<string, Promise<FrameScan>>());
 
   // ── Playback ─────────────────────────────────────────────────────
   const [playing, setPlaying] = useState(false);
@@ -426,11 +428,12 @@ export function useSwingSide(o: SideOptions) {
       const def = PRESETS.find((p) => p.id === presetId);
       if (!def) return;
       // Snap to the golfer: pose at Address if tagged and detected, otherwise the current frame.
-      const pose = (bookmarks.A !== undefined ? poseAt(poseTrack, bookmarks.A) : null) ?? poseAt(poseTrack, videoRef.current?.currentTime ?? 0);
-      const fitted = meta ? fitPreset(def, pose, meta.width, meta.height, handed) : null;
-      let points = fitted ?? def.points.map((p) => ({ ...p }));
+      const t = bookmarks.A ?? videoRef.current?.currentTime ?? 0;
+      const pose = poseAt(poseTrack, t);
+      const mirror = (pts: Point[]) => (flip ? pts.map((p) => ({ x: 1 - p.x, y: p.y })) : pts);
       // A mirrored (Flip Horizontal) video shows the golfer flipped, while drawings stay in screen space.
-      if (fitted && flip) points = points.map((p) => ({ x: 1 - p.x, y: p.y }));
+      const fitted = meta ? fitPreset(def, pose, meta.width, meta.height, handed) : null;
+      const points = fitted ? mirror(fitted) : def.points.map((p) => ({ ...p }));
       const shape: Shape = {
         id: newId(),
         kind: def.kind,
@@ -440,8 +443,34 @@ export function useSwingSide(o: SideOptions) {
         label: def.name,
       };
       setShapes((prev) => [...prev, shape]);
+
+      // Refine DTL presets from the actual frame: trace the back from the body outline and find the
+      // club shaft in the pixels. Replaces the quick fit unless the user has already moved the shape.
+      if (!poseTrack || !src || !meta || def.angle !== "DTL") return;
+      const key = `${src}@${t.toFixed(3)}`;
+      let scan = scanCache.current.get(key);
+      if (!scan) {
+        scan = scanFrame(src, t);
+        scanCache.current.set(key, scan);
+        scan.catch(() => scanCache.current.delete(key));
+      }
+      const { width: W, height: H } = meta;
+      scan
+        .then((s) => {
+          const better = fitPreset(def, s.pose ?? pose, W, H, handed, { mask: s.mask, lum: s.lum });
+          if (!better) return;
+          const next = mirror(better);
+          setShapes((prev) =>
+            prev.map((x) =>
+              x.id === shape.id && x.points.length === points.length && x.points.every((p, i) => p.x === points[i].x && p.y === points[i].y)
+                ? { ...x, points: next }
+                : x,
+            ),
+          );
+        })
+        .catch((err) => console.warn("[presets] frame scan failed; keeping the quick fit", err));
     },
-    [checkpoint, selectedId, bookmarks.A, poseTrack, meta, handed, flip],
+    [checkpoint, selectedId, bookmarks.A, poseTrack, meta, handed, flip, src],
   );
 
   // ── Current-frame pose + metrics (pure lookups, no inference) ───

@@ -224,6 +224,98 @@ async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
   }
 }
 
+// ── Single-frame scan (preset fitting) ─────────────────────────────────
+/** A grayscale or 0..1 float raster; (x, y) map to normalized frame coords via x / w, y / h. */
+export interface Raster<T extends ArrayLike<number>> {
+  w: number;
+  h: number;
+  data: T;
+}
+
+export interface FrameScan {
+  pose: PoseFrame | null;
+  /** Person segmentation: 1 = body, 0 = background. */
+  mask: Raster<Float32Array> | null;
+  /** Frame luminance, for finding the club shaft. */
+  lum: Raster<Uint8ClampedArray>;
+}
+
+let segLoader: Promise<PoseLandmarkerT> | null = null;
+function loadSegmenter(): Promise<PoseLandmarkerT> {
+  if (!segLoader) {
+    segLoader = (async () => {
+      const { FilesetResolver, PoseLandmarker } = await import("@mediapipe/tasks-vision");
+      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      return PoseLandmarker.createFromOptions(fileset, {
+        // CPU keeps the mask readback simple and is plenty fast for one frame.
+        baseOptions: { modelAssetPath: MODEL_URLS.full, delegate: "CPU" },
+        runningMode: "IMAGE",
+        numPoses: 1,
+        outputSegmentationMasks: true,
+      });
+    })();
+    segLoader.catch(() => (segLoader = null));
+  }
+  return segLoader;
+}
+
+/**
+ * Pose + body outline + pixels for one moment of a video (e.g. Address). Runs on a private hidden
+ * video so the user's playback isn't disturbed, and through the same queue as full analyses.
+ */
+export function scanFrame(src: string, t: number): Promise<FrameScan> {
+  const run = queue.then(
+    () => runScan(src, t),
+    () => runScan(src, t),
+  );
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function runScan(src: string, t: number): Promise<FrameScan> {
+  const seg = await loadSegmenter();
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.preload = "auto";
+  video.crossOrigin = "anonymous";
+  video.src = src;
+  try {
+    if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
+    await seekTo(video, Math.max(0, t));
+    // Work at ≤ 1280 px on the long side: enough detail for a thin shaft, cheap to scan.
+    const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.max(1, Math.round(video.videoWidth * k));
+    const h = Math.max(1, Math.round(video.videoHeight * k));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Canvas not supported");
+    ctx.drawImage(video, 0, 0, w, h);
+    const rgba = ctx.getImageData(0, 0, w, h).data;
+    const gray = new Uint8ClampedArray(w * h);
+    for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
+
+    const res = seg.detect(canvas);
+    const lms = res.landmarks?.[0];
+    const pose: PoseFrame | null =
+      lms && lms.length >= 33 ? { lm: lms.map((p) => ({ x: p.x, y: p.y, z: p.z, v: p.visibility ?? 1 })), world: null } : null;
+    let mask: Raster<Float32Array> | null = null;
+    const m = res.segmentationMasks?.[0];
+    if (m) {
+      mask = { w: m.width, h: m.height, data: new Float32Array(m.getAsFloat32Array()) };
+      m.close();
+    }
+    return { pose, mask, lum: { w, h, data: gray } };
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
 /** Pose for a playback time, or null if none (or not analyzed). Constant-time lookup. */
 export function poseAt(track: PoseTrack | null, t: number): PoseFrame | null {
   if (!track || track.frames.length === 0) return null;
