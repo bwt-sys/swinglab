@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Observation Timer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Observation Timer</h1>
+    <span id="status" class="status">Setup</span>
+  </header>
+
+  <main>
+    <!-- ───────── Setup ───────── -->
+    <section id="setup" class="panel">
+      <h2>Session</h2>
+      <div class="grid">
+        <label>Participant ID<input id="participant" autocomplete="off"></label>
+        <label>Observer<input id="observer" autocomplete="off"></label>
+        <label>Session length (min)
+          <input id="sessionMin" type="number" min="0" step="0.5">
+          <small>0 = no limit, end manually</small>
+        </label>
+        <label>Interval length (s)<input id="intervalSec" type="number" min="1" step="1"></label>
+        <label>Interval method
+          <select id="method">
+            <option value="partial">Partial interval</option>
+            <option value="whole">Whole interval</option>
+            <option value="momentary">Momentary time sampling</option>
+          </select>
+        </label>
+        <label class="check"><input id="cue" type="checkbox"> Beep and vibrate at each interval</label>
+      </div>
+
+      <h2>Behaviours</h2>
+      <div class="scroll">
+        <table class="beh-table">
+          <thead><tr><th>Name</th><th>Key</th><th>Type</th><th><span class="sr">Remove</span></th></tr></thead>
+          <tbody id="behRows"></tbody>
+        </table>
+      </div>
+      <button id="addBeh" class="secondary" type="button">+ Add behaviour</button>
+
+      <p id="setupError" class="error" role="alert"></p>
+      <div class="actions"><button id="startBtn" class="primary" type="button">Start session</button></div>
+
+      <p class="hint">
+        <b>Event</b> behaviours count each occurrence. <b>Duration</b> behaviours switch on and off with each press of their key.
+        Whole-interval and momentary methods score only duration behaviours.
+        During a session: <kbd>Space</kbd> pauses or resumes, <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes the last entry, and <kbd>Enter</kbd> in the note box adds a note.
+      </p>
+    </section>
+
+    <!-- ───────── Running ───────── -->
+    <section id="run" class="panel" hidden>
+      <div id="meta" class="meta"></div>
+      <div class="clock">
+        <div><div class="label">Elapsed</div><div id="elapsed" class="big">0:00.0</div></div>
+        <div><div class="label">Remaining</div><div id="remaining" class="big">–</div></div>
+        <div><div class="label">Interval</div><div id="intervalNum" class="big">1</div></div>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="intervalBar"></div></div>
+
+      <div id="behButtons" class="beh-buttons"></div>
+
+      <div class="note-row">
+        <input id="noteInput" placeholder="Add a timestamped note…" autocomplete="off">
+        <button id="noteBtn" class="secondary" type="button">Add note</button>
+      </div>
+
+      <div class="actions">
+        <button id="pauseBtn" class="secondary" type="button">Pause</button>
+        <button id="undoBtn" class="secondary" type="button">Undo</button>
+        <button id="stopBtn" class="danger" type="button">End session</button>
+      </div>
+
+      <h2>Log</h2>
+      <ol id="log" class="log"></ol>
+    </section>
+
+    <!-- ───────── Results ───────── -->
+    <section id="results" class="panel" hidden>
+      <h2>Summary</h2>
+      <div id="summaryMeta" class="meta"></div>
+      <div class="scroll"><table id="summary" class="data"></table></div>
+
+      <h2>Intervals</h2>
+      <div class="scroll tall"><table id="intervals" class="data intervals"></table></div>
+
+      <div class="actions">
+        <button id="csvEvents" class="secondary" type="button">Events CSV</button>
+        <button id="csvIntervals" class="secondary" type="button">Intervals CSV</button>
+        <button id="csvSummary" class="secondary" type="button">Summary CSV</button>
+        <button id="newBtn" class="primary" type="button">New session</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

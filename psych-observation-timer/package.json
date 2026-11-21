@@ -1,0 +1,9 @@
+{
+  "name": "psych-observation-timer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone static web app for direct behavioural observation: interval recording, event counts, durations, CSV export.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
