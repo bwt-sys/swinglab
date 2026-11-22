@@ -15,6 +15,7 @@ interface Props {
   checkpoint: () => void;
   tool: Tool;
   color: string;
+  showLineTilt: boolean;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
 }
@@ -33,6 +34,7 @@ export default function TelestratorCanvas({
   checkpoint,
   tool,
   color,
+  showLineTilt,
   selectedId,
   setSelectedId,
 }: Props) {
@@ -68,9 +70,10 @@ export default function TelestratorCanvas({
       selectedId,
       hoverHandle,
       showHandles: tool === "move",
+      showLineTilt,
       touch: touchMode,
     });
-  }, [shapes, draft, width, height, selectedId, hoverHandle, tool, touchMode]);
+  }, [shapes, draft, width, height, selectedId, hoverHandle, tool, touchMode, showLineTilt]);
 
   // Cancel any in-progress angle when switching tools.
   useEffect(() => {

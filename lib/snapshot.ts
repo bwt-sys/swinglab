@@ -24,6 +24,8 @@ export interface SnapshotPanel {
   handed: Handed;
   showSkeleton: boolean;
   shapes: Shape[];
+  /** Show the "° from vertical" pill on drawn lines (default true). */
+  showLineTilt?: boolean;
   /** e.g. "Top (T)" or "Between Address and Top". */
   checkpoint: string;
   /** e.g. "0:01.23 · frame 37". */
@@ -114,7 +116,7 @@ function drawPanel(
     const lctx = layer.getContext("2d");
     if (lctx) {
       lctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
-      renderScene(lctx, p.shapes, { width: vw, height: PANEL_H, draft: null, selectedId: null, hoverHandle: null, showHandles: false });
+      renderScene(lctx, p.shapes, { width: vw, height: PANEL_H, draft: null, selectedId: null, hoverHandle: null, showHandles: false, showLineTilt: p.showLineTilt });
       ctx.drawImage(layer, vx, top, vw, PANEL_H);
     }
   }
