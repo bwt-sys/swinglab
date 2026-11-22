@@ -433,7 +433,7 @@ export function useSwingSide(o: SideOptions) {
     const idx = Array.from({ length: end - start + 1 }, (_, i) => start + i);
     grabRegion(src, idx.map((i) => (i + 0.5) / fps), roi, 400)
       .then((crops) => {
-        const k = takeawayStart(crops, guess - start);
+        const k = takeawayStart(crops, guess - start, fps);
         if (k === null) return done();
         const A = (idx[k] + 0.5) / fps;
         // Only if the user hasn't re-tagged Address meanwhile.
