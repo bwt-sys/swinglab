@@ -58,8 +58,9 @@ const quantile = (s: number[], q: number) => {
 /**
  * Index (into `crops`) of the last still frame before the takeaway, or null if no clear start.
  * `guess` is the pose-based Address index within `crops`; the takeaway must be under way soon after it.
+ * `fps` is the frame rate of `crops`.
  */
-export function takeawayStart(crops: Raster<Uint8ClampedArray>[], guess: number): number | null {
+export function takeawayStart(crops: Raster<Uint8ClampedArray>[], guess: number, fps: number): number | null {
   const n = crops.length;
   if (n < 6) return null;
   // Per-pixel threshold above sensor/compression noise: well clear of the typical frame-to-frame change.
@@ -81,9 +82,13 @@ export function takeawayStart(crops: Raster<Uint8ClampedArray>[], guess: number)
   if (peak < hi) return null;
 
   // First clearly-moving step at or after the guess (the takeaway), then back to where motion began.
+  // Sustained: a takeaway keeps moving, while a jiggle or a compression blip is a one-frame spike.
+  const run = Math.max(2, Math.round(0.05 * fps));
   let j = -1;
-  for (let i = Math.max(1, guess - 2); i < n; i++) {
-    if (m[i] >= hi) {
+  for (let i = Math.max(1, guess - 2); i + run - 1 < n; i++) {
+    let ok = true;
+    for (let r = 0; r < run && ok; r++) ok = m[i + r] >= hi;
+    if (ok) {
       j = i;
       break;
     }
@@ -93,24 +98,100 @@ export function takeawayStart(crops: Raster<Uint8ClampedArray>[], guess: number)
   while (k > 1 && m[k - 1] > lo) k--;
   if (k <= 1) return null; // never still in the window: can't tell where the takeaway began
 
-  // Frame-to-frame change misses the first sub-pixel creep of a slow takeaway, so finish against a
-  // fixed reference: the still stretch before the motion. Distance from it grows with the total
-  // displacement, so it clears the noise frames earlier.
-  let s0 = k - 1;
-  while (s0 > 0 && m[s0] <= lo) s0--; // m[s0] > lo or s0 = 0: frames s0..k−1 are still
-  if (m[s0] > lo) s0++;
-  const still = k - s0; // frames s0..k−1
-  if (still < 4) return k - 1;
-  const refN = Math.min(5, Math.max(2, Math.floor(still / 2)));
-  const ref = medianFrame(crops.slice(s0, s0 + refN));
-  const D = (i: number) => changed(ref, crops[i], thresh);
-  // Noise: how far the reference frames themselves sit from their median.
-  let noise = 0;
-  for (let i = s0; i < s0 + refN; i++) noise = Math.max(noise, D(i));
-  const lim = Math.max(0.0008, 1.5 * noise);
-  let a = j;
-  while (a > s0 + refN && D(a - 1) > lim) a--;
-  return a - 1;
+  // Frame-to-frame change misses the first sub-pixel creep of a slow takeaway, so finish with the
+  // distance from a reference frame over a short window before the motion. Real clips drift while
+  // the golfer is set (camera wobble, breathing, the clubhead jiggling as it hovers), and that drift
+  // also grows the distance — roughly linearly — whereas the takeaway accelerates. So fit
+  // "straight-line drift, then drift + a·(i−t)²" and take the bend t as the last still frame.
+  // The window is short (≈0.2 s) so drift can't add up into a false early start.
+  const w0 = Math.max(0, k - 1 - Math.max(4, Math.round(0.2 * fps)));
+  if (j - w0 < 6) return k - 1;
+  const ref = medianFrame(crops.slice(w0, w0 + 3));
+  const D: number[] = [];
+  for (let i = w0; i <= j; i++) D.push(changed(ref, crops[i], thresh));
+  const bend = fitBend(D, 3, k - w0);
+  return bend === null ? k - 1 : w0 + bend;
+}
+
+/**
+ * Best bend t in [tMin, tMax] for d(i) ≈ c0 + c1·i, plus p·(i−t) + q·(i−t)² after t, with c1, p, q ≥ 0
+ * (drift and motion only ever add distance; the motion may show up as a ramp, a curve or both).
+ * Null if no bend fits better than a straight line.
+ */
+function fitBend(d: number[], tMin: number, tMax: number): number | null {
+  const n = d.length;
+  let best: number | null = null;
+  let bestSSE = lineSSE(d);
+  // Column subsets of [1, i, ramp, curve]: always the constant, at least one motion term.
+  const subsets = [
+    [0, 1, 2, 3],
+    [0, 1, 2],
+    [0, 1, 3],
+    [0, 2, 3],
+    [0, 2],
+    [0, 3],
+  ];
+  for (let t = tMin; t <= Math.min(tMax, n - 3); t++) {
+    const basis = (i: number) => {
+      const u = i > t ? i - t : 0;
+      return [1, i, u, u * u];
+    };
+    for (const cols of subsets) {
+      const c = leastSquares(d, (i) => cols.map((k) => basis(i)[k]));
+      if (!c || c.slice(1).some((v) => v < 0)) continue;
+      let sse = 0;
+      for (let i = 0; i < n; i++) {
+        const f = basis(i);
+        sse += (d[i] - cols.reduce((acc, k, x) => acc + c[x] * f[k], 0)) ** 2;
+      }
+      if (sse < bestSSE - 1e-15) {
+        bestSSE = sse;
+        best = t;
+      }
+    }
+  }
+  return best;
+}
+
+/** Least squares for d(i) ≈ Σ c·f(i) via the normal equations (Gaussian elimination); null if singular. */
+function leastSquares(d: number[], f: (i: number) => number[]): number[] | null {
+  const k = f(0).length;
+  const M = Array.from({ length: k }, () => new Array<number>(k + 1).fill(0));
+  for (let i = 0; i < d.length; i++) {
+    const v = f(i);
+    for (let a = 0; a < k; a++) {
+      M[a][k] += v[a] * d[i];
+      for (let b = 0; b < k; b++) M[a][b] += v[a] * v[b];
+    }
+  }
+  for (let col = 0; col < k; col++) {
+    let piv = col;
+    for (let r = col + 1; r < k; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if (Math.abs(M[piv][col]) < 1e-12) return null;
+    [M[col], M[piv]] = [M[piv], M[col]];
+    for (let r = 0; r < k; r++) {
+      if (r === col) continue;
+      const g = M[r][col] / M[col][col];
+      for (let c = col; c <= k; c++) M[r][c] -= g * M[col][c];
+    }
+  }
+  return M.map((row, i) => row[k] / row[i]);
+}
+
+function lineSSE(d: number[]): number {
+  const n = d.length;
+  const mx = (n - 1) / 2;
+  const my = d.reduce((a, v) => a + v, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (i - mx) * (d[i] - my);
+    sxx += (i - mx) ** 2;
+  }
+  const b = sxx ? sxy / sxx : 0;
+  let sse = 0;
+  for (let i = 0; i < n; i++) sse += (d[i] - (my + b * (i - mx))) ** 2;
+  return sse;
 }
 
 /** Per-pixel median of a few equal-size crops (a low-noise reference frame). */
