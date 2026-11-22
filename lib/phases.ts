@@ -5,7 +5,8 @@
  *   1. Fastest downward wrist motion → somewhere in the downswing (the anchor).
  *   2. Top     = highest wrist point before the anchor.
  *   3. Impact  = lowest wrist point shortly after the anchor.
- *   4. Address = last moment before Top where the hands were still near their low starting height.
+ *   4. Address = last moment before Top where the hands were still near their low starting height
+ *      (then pinned to the exact frame from the club pixels, see takeaway.ts).
  *   5. Finish  = first moment after Impact when the hands reach (close to) their highest follow-through point.
  */
 import { LM, type PoseTrack } from "./pose";

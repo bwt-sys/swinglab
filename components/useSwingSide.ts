@@ -6,8 +6,9 @@ import { SAMPLE_VIDEO_URL, SUPPORTED_EXTENSIONS } from "@/lib/constants";
 import { newId } from "@/lib/geometry";
 import { computeMetrics, keyNumbers, type Handed } from "@/lib/metrics";
 import { detectPhases } from "@/lib/phases";
-import { analyzeVideo, detectedCount, poseAt, scanFrame, type FrameScan, type PoseModel, type PoseTrack } from "@/lib/pose";
+import { analyzeVideo, detectedCount, grabRegion, poseAt, scanFrame, type FrameScan, type PoseModel, type PoseTrack } from "@/lib/pose";
 import { PRESETS } from "@/lib/presets";
+import { clubRoi, frameOf as frameIndex, takeawayStart } from "@/lib/takeaway";
 import { fitPreset } from "@/lib/presetFit";
 import type { Bookmarks, CameraAngle, CheckpointKey, Fps, Point, Shape, VideoMeta } from "@/lib/types";
 
@@ -53,6 +54,8 @@ export function useSwingSide(o: SideOptions) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [bookmarks, setBookmarks] = useState<Bookmarks>({});
+  const bookmarksRef = useRef<Bookmarks>(bookmarks);
+  bookmarksRef.current = bookmarks;
 
   // ── Telestrator ──────────────────────────────────────────────────
   const [shapes, setShapes] = useState<Shape[]>([]);
@@ -400,20 +403,51 @@ export function useSwingSide(o: SideOptions) {
 
   const autoDetect = useCallback(() => {
     if (!poseTrack) return;
-    const r = detectPhases(poseTrack, meta ? meta.width / meta.height : 1);
+    const aspect = meta ? meta.width / meta.height : 1;
+    const r = detectPhases(poseTrack, aspect);
     if ("error" in r) {
       setPhaseMessage({ ok: false, text: r.error });
       return;
     }
     const b = r.bookmarks;
+    const report = (bm: Required<Bookmarks>, note = "") => {
+      const tempo = (bm.T - bm.A) / (bm.I - bm.T);
+      setPhaseMessage({
+        ok: true,
+        text: `Set A/T/I/F · backswing ${(bm.T - bm.A).toFixed(2)}s, downswing ${(bm.I - bm.T).toFixed(2)}s, tempo ${tempo.toFixed(1)} : 1.${note} Check each with Go and re-tag if needed.`,
+      });
+    };
     setBookmarks(b);
-    const tempo = (b.T - b.A) / (b.I - b.T);
-    setPhaseMessage({
-      ok: true,
-      text: `Set A/T/I/F · backswing ${(b.T - b.A).toFixed(2)}s, downswing ${(b.I - b.T).toFixed(2)}s, tempo ${tempo.toFixed(1)} : 1. Check each with Go and re-tag if needed.`,
-    });
+    report(b, " Pinpointing the takeaway…");
     navigate(b.A);
-  }, [poseTrack, meta, navigate]);
+
+    // Refine Address from the pixels around the club (see lib/takeaway.ts).
+    const fps = poseTrack.fps;
+    const guess = frameIndex(b.A, fps);
+    const roi = clubRoi(poseTrack, guess, aspect);
+    const done = () => report(b);
+    if (!roi || !src) return done();
+    const start = Math.max(0, guess - Math.round(1.0 * fps));
+    const end = Math.min(frameIndex(b.T, fps) - 1, guess + Math.round(0.4 * fps));
+    if (end - start < 6) return done();
+    const idx = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    grabRegion(src, idx.map((i) => (i + 0.5) / fps), roi, 400)
+      .then((crops) => {
+        const k = takeawayStart(crops, guess - start);
+        if (k === null) return done();
+        const A = (idx[k] + 0.5) / fps;
+        // Only if the user hasn't re-tagged Address meanwhile.
+        if (bookmarksRef.current.A !== b.A) return;
+        setBookmarks((cur) => (cur.A === b.A ? { ...cur, A } : cur));
+        const nb = { ...b, A };
+        report(nb);
+        if (Math.abs((videoRef.current?.currentTime ?? b.A) - b.A) < 0.5 / fps) navigate(A);
+      })
+      .catch((err) => {
+        console.warn("[phases] takeaway refinement failed; keeping the pose estimate", err);
+        done();
+      });
+  }, [poseTrack, meta, navigate, src]);
 
   // ── Presets ──────────────────────────────────────────────────────
   const togglePreset = useCallback(

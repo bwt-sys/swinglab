@@ -354,3 +354,58 @@ export function poseAt(track: PoseTrack | null, t: number): PoseFrame | null {
 export function detectedCount(track: PoseTrack | null): number {
   return track ? track.frames.reduce((n, f) => n + (f ? 1 : 0), 0) : 0;
 }
+
+// ── Region grabs (pixel-level checks such as the takeaway start) ───────
+/** A normalized rectangle of the (upright) frame. */
+export interface Roi {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Grayscale crops of `roi` at each time in `times`, all the same size (long side ≤ `maxPx`).
+ * Runs on its own hidden video, so playback and the landmarker are untouched.
+ */
+export async function grabRegion(src: string, times: number[], roi: Roi, maxPx = 200): Promise<Raster<Uint8ClampedArray>[]> {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.preload = "auto";
+  video.crossOrigin = "anonymous";
+  video.src = src;
+  try {
+    if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) throw new Error("Video has no frames");
+    const sx = roi.x * vw;
+    const sy = roi.y * vh;
+    const sw = Math.max(1, roi.w * vw);
+    const sh = Math.max(1, roi.h * vh);
+    const k = Math.min(1, maxPx / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * k));
+    const h = Math.max(1, Math.round(sh * k));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Canvas not supported");
+    const out: Raster<Uint8ClampedArray>[] = [];
+    for (const t of times) {
+      await seekTo(video, Math.max(0, t));
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+      const rgba = ctx.getImageData(0, 0, w, h).data;
+      const gray = new Uint8ClampedArray(w * h);
+      for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
+      out.push({ w, h, data: gray });
+    }
+    return out;
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
