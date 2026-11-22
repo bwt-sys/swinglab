@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { pixelReadbackScrambled } from "@/lib/canvasCheck";
 import type { Handed, MetricRow } from "@/lib/metrics";
 import type { PoseModel } from "@/lib/pose";
 import type { CameraAngle } from "@/lib/types";
@@ -70,6 +71,9 @@ export default function PosePanel(p: Props) {
   const pct = p.analysis.total ? (p.analysis.done / p.analysis.total) * 100 : 0;
   const hasTrack = !!p.coverage;
   const [tab, setTab] = useState<Tab>("metrics");
+  // Checked after mount: it needs a real document, and the static export renders without one.
+  const [scrambled, setScrambled] = useState(false);
+  useEffect(() => setScrambled(pixelReadbackScrambled()), []);
 
   return (
     <>
@@ -84,6 +88,19 @@ export default function PosePanel(p: Props) {
         }
       >
         <div className="flex flex-col gap-2.5">
+          {scrambled && (
+            <div data-testid="scrambled-warning" role="alert" className="rounded-xl border border-amber-400/50 bg-amber-400/10 p-3 text-xs leading-relaxed text-amber-200">
+              <p className="font-semibold text-amber-100">This browser is scrambling image data, so the AI will get it wrong.</p>
+              <p className="mt-1">
+                Its anti-fingerprinting protection adds noise to the pixels the pose model reads back. That throws the skeleton off and
+                makes frames and phases go undetected. Firefox Focus does this, and so does Firefox with strict tracking protection.
+              </p>
+              <p className="mt-1">
+                Fix: turn off tracking protection for this site (the shield icon next to the address), then reload. Or open SwingLab in
+                regular Chrome, Firefox or Safari.
+              </p>
+            </div>
+          )}
           {busy ? (
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-3">
               <div className="mb-2 flex items-center justify-between text-xs">
