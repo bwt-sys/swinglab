@@ -134,6 +134,22 @@ async function seekTo(el: HTMLVideoElement, t: number) {
   await done;
 }
 
+/** Max long side (px) of the frames given to the model; it works on ~256 px inputs internally. */
+const MAX_FRAME_PX = 1280;
+
+/** An upright (rotation-applied) canvas sized to the video's display dimensions, capped at MAX_FRAME_PX. */
+function frameCanvas(video: HTMLVideoElement): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const k = Math.min(1, MAX_FRAME_PX / Math.max(vw, vh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(vw * k));
+  canvas.height = Math.max(1, Math.round(vh * k));
+  const ctx = canvas.getContext("2d");
+  return ctx ? { canvas, ctx } : null;
+}
+
 export interface AnalyzeOptions {
   src: string;
   fps: number;
@@ -179,6 +195,13 @@ async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
   try {
     if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
 
+    // Feed the model a 2D canvas copy of each frame rather than the <video> itself. Drawing to a
+    // canvas applies the file's rotation flag (phone videos are stored sideways and flagged to
+    // display upright); handing the raw video to WebGL ignores that flag on some browsers (notably
+    // iOS Safari), so the model sees the golfer lying on their side: few detections and joints that
+    // land 90° off. Downscaling also keeps 4K phone video cheap to upload every frame.
+    const frame = frameCanvas(video);
+
     const total = Math.max(1, Math.floor(opts.duration * opts.fps));
     const frames: (PoseFrame | null)[] = new Array(total).fill(null);
     let lastYield = performance.now();
@@ -195,7 +218,12 @@ async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
       lastTs = ts;
       tsCursor = ts; // Survives cancellation so the next run keeps increasing.
       try {
-        const res = landmarker.detectForVideo(video, ts);
+        let input: HTMLVideoElement | HTMLCanvasElement = video;
+        if (frame) {
+          frame.ctx.drawImage(video, 0, 0, frame.canvas.width, frame.canvas.height);
+          input = frame.canvas;
+        }
+        const res = landmarker.detectForVideo(input, ts);
         const lms = res.landmarks?.[0];
         if (lms && lms.length >= 33) {
           frames[i] = {
@@ -286,7 +314,7 @@ async function runScan(src: string, t: number): Promise<FrameScan> {
     if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
     await seekTo(video, Math.max(0, t));
     // Work at ≤ 1280 px on the long side: enough detail for a thin shaft, cheap to scan.
-    const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+    const k = Math.min(1, MAX_FRAME_PX / Math.max(video.videoWidth, video.videoHeight));
     const w = Math.max(1, Math.round(video.videoWidth * k));
     const h = Math.max(1, Math.round(video.videoHeight * k));
     const canvas = document.createElement("canvas");
@@ -325,4 +353,59 @@ export function poseAt(track: PoseTrack | null, t: number): PoseFrame | null {
 
 export function detectedCount(track: PoseTrack | null): number {
   return track ? track.frames.reduce((n, f) => n + (f ? 1 : 0), 0) : 0;
+}
+
+// ── Region grabs (pixel-level checks such as the takeaway start) ───────
+/** A normalized rectangle of the (upright) frame. */
+export interface Roi {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Grayscale crops of `roi` at each time in `times`, all the same size (long side ≤ `maxPx`).
+ * Runs on its own hidden video, so playback and the landmarker are untouched.
+ */
+export async function grabRegion(src: string, times: number[], roi: Roi, maxPx = 200): Promise<Raster<Uint8ClampedArray>[]> {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.preload = "auto";
+  video.crossOrigin = "anonymous";
+  video.src = src;
+  try {
+    if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) throw new Error("Video has no frames");
+    const sx = roi.x * vw;
+    const sy = roi.y * vh;
+    const sw = Math.max(1, roi.w * vw);
+    const sh = Math.max(1, roi.h * vh);
+    const k = Math.min(1, maxPx / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * k));
+    const h = Math.max(1, Math.round(sh * k));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Canvas not supported");
+    const out: Raster<Uint8ClampedArray>[] = [];
+    for (const t of times) {
+      await seekTo(video, Math.max(0, t));
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+      const rgba = ctx.getImageData(0, 0, w, h).data;
+      const gray = new Uint8ClampedArray(w * h);
+      for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
+      out.push({ w, h, data: gray });
+    }
+    return out;
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
 }
