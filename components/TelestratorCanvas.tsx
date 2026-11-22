@@ -42,15 +42,7 @@ export default function TelestratorCanvas({
   const dragRef = useRef<Drag>(null);
   const [draft, setDraft] = useState<Shape | null>(null);
   const [angleClicks, setAngleClicks] = useState<Point[]>([]);
-  const [hoverHandle, setHoverHandle] = useState<{ shapeId: string; index: number } | null>(null);
   const [cursor, setCursor] = useState("crosshair");
-  /** True after a touch interaction (or on coarse-pointer devices): bigger targets + grip rings. */
-  const [touchMode, setTouchMode] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches) setTouchMode(true);
-  }, []);
-
   // ── Rendering ────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -68,12 +60,9 @@ export default function TelestratorCanvas({
       height,
       draft,
       selectedId,
-      hoverHandle,
-      showHandles: tool === "move",
       showLineTilt,
-      touch: touchMode,
     });
-  }, [shapes, draft, width, height, selectedId, hoverHandle, tool, touchMode, showLineTilt]);
+  }, [shapes, draft, width, height, selectedId, showLineTilt]);
 
   // Cancel any in-progress angle when switching tools.
   useEffect(() => {
@@ -115,8 +104,6 @@ export default function TelestratorCanvas({
     // Primary button / first finger only: a second finger must not start a parallel drag.
     if (e.button !== 0 || !e.isPrimary) return;
     e.preventDefault();
-    const isTouch = e.pointerType === "touch" || e.pointerType === "pen";
-    if (isTouch !== touchMode && e.pointerType !== "pen") setTouchMode(isTouch);
     const p = toNorm(e);
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -230,7 +217,6 @@ export default function TelestratorCanvas({
     // Hover feedback (mouse / hovering stylus only — touch has no hover).
     if (angleClicks.length === 0 && e.pointerType !== "touch") {
       const hh = hitHandle(shapes, p, width, height);
-      setHoverHandle(hh);
       if (hh) setCursor("grab");
       else if (tool === "move") setCursor(hitShape(shapes, p, width, height) ? "move" : "default");
       else setCursor("crosshair");
@@ -244,7 +230,6 @@ export default function TelestratorCanvas({
     dragRef.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (drag?.type === "draw") setDraft(null);
-    setHoverHandle(null);
     setCursor(tool === "move" ? "move" : "crosshair");
   };
 
@@ -275,7 +260,6 @@ export default function TelestratorCanvas({
   };
 
   const onPointerLeave = () => {
-    setHoverHandle(null);
   };
 
   return (

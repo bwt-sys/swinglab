@@ -116,7 +116,7 @@ function drawPanel(
     const lctx = layer.getContext("2d");
     if (lctx) {
       lctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
-      renderScene(lctx, p.shapes, { width: vw, height: PANEL_H, draft: null, selectedId: null, hoverHandle: null, showHandles: false, showLineTilt: p.showLineTilt });
+      renderScene(lctx, p.shapes, { width: vw, height: PANEL_H, draft: null, selectedId: null, showLineTilt: p.showLineTilt });
       ctx.drawImage(layer, vx, top, vw, PANEL_H);
     }
   }
