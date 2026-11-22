@@ -49,6 +49,7 @@ export default function SwingLab() {
   const [color, setColor] = useState<string>(NEON_COLORS[0].value);
   const [poseModel, setPoseModel] = useState<PoseModel>("full");
   const [showSkeleton, setShowSkeleton] = useState(true);
+  const [showLineTilt, setShowLineTilt] = useState(true);
   const [activeKey, setActiveKey] = useState<SideKey>("L");
   /** Mobile / tablet: the sidebar is an off-canvas drawer. */
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -258,6 +259,10 @@ export default function SwingLab() {
       }
 
       const k = e.key.toUpperCase();
+      if (k === "V" && !e.shiftKey) {
+        setShowLineTilt((v) => !v);
+        return;
+      }
       if (k === "A" || k === "T" || k === "I" || k === "F") {
         e.preventDefault();
         if (e.shiftKey) h.S.setCheckpointAt(k);
@@ -337,6 +342,7 @@ export default function SwingLab() {
         handed: s.handed,
         showSkeleton: showSkeleton && !!s.poseTrack,
         shapes: s.shapes,
+        showLineTilt,
         checkpoint: checkpointLabel(s),
         position: `${formatTime(t)} · frame ${s.frameOf(t)}`,
         stats,
@@ -373,6 +379,7 @@ export default function SwingLab() {
         checkpoint={s.checkpoint}
         tool={tool}
         color={color}
+        showLineTilt={showLineTilt}
         selectedId={s.selectedId}
         setSelectedId={s.setSelectedId}
         pose={s.currentPose}
@@ -641,6 +648,8 @@ export default function SwingLab() {
             onUndo={S.undo}
             onClear={S.clearAll}
             hasShapes={S.shapes.length > 0}
+            showLineTilt={showLineTilt}
+            onToggleLineTilt={() => setShowLineTilt((v) => !v)}
           />
 
           {/* Stages. Your Swing keeps the same tree position in both modes so the video isn't reloaded. */}

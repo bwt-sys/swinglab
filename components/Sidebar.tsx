@@ -273,6 +273,7 @@ export default function Sidebar(p: Props) {
             ["1–5", "Move, Line, Circle, Angle, Pen"],
             ["Ctrl/⌘+Z", "Undo"],
             ["Del", "Delete selected shape"],
+            ["V", "Line ° labels on / off"],
             ["Esc", "Cancel / deselect"],
           ].map(([k, v]) => (
             <div key={k} className="contents">

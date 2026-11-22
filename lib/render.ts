@@ -1,4 +1,4 @@
-import { angleAt, hasHandles, tiltFromVertical, toPx } from "./geometry";
+import { angleAt, tiltFromVertical, toPx } from "./geometry";
 import type { Point, Shape } from "./types";
 
 export interface RenderOptions {
@@ -7,16 +7,11 @@ export interface RenderOptions {
   height: number;
   draft: Shape | null;
   selectedId: string | null;
-  hoverHandle: { shapeId: string; index: number } | null;
-  showHandles: boolean;
-  /**
-   * Touch mode: bigger handle dots plus translucent grip rings around the endpoints of the selected
-   * shape, so a fingertip can grab the ring without hiding the point being placed.
-   */
-  touch?: boolean;
+  /** Show the "° from vertical" pill on drawn lines (default true). */
+  showLineTilt?: boolean;
 }
 
-/** Radius (CSS px) of the touch grip ring; also the touch hit radius, so the ring shows what's grabbable. */
+/** Hit radius (CSS px) for grabbing a shape's endpoint with a finger. */
 export const TOUCH_GRIP_RADIUS = 20;
 
 const FONT = "600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
@@ -72,7 +67,7 @@ function strokeShape(ctx: CanvasRenderingContext2D, s: Shape, w: number, h: numb
   ctx.stroke();
 }
 
-function drawLabels(ctx: CanvasRenderingContext2D, s: Shape, w: number, h: number) {
+function drawLabels(ctx: CanvasRenderingContext2D, s: Shape, w: number, h: number, showTilt: boolean) {
   const pts = s.points.map((p) => toPx(p, w, h));
   if (s.kind === "angle" && s.points.length === 3) {
     const deg = angleAt(s.points[0], s.points[1], s.points[2], w, h);
@@ -100,10 +95,11 @@ function drawLabels(ctx: CanvasRenderingContext2D, s: Shape, w: number, h: numbe
     return;
   }
   if (s.kind === "line" && s.points.length === 2) {
-    const tilt = tiltFromVertical(s.points[0], s.points[1], w, h);
+    const tilt = tiltFromVertical(s.points[0], s.points[1], w, h).toFixed(1);
+    const text = showTilt ? (s.label ? `${s.label} · ${tilt}°` : `${tilt}° from vertical`) : s.label;
+    if (!text) return;
     const mx = (pts[0].x + pts[1].x) / 2;
     const my = (pts[0].y + pts[1].y) / 2;
-    const text = s.label ? `${s.label} · ${tilt.toFixed(1)}°` : `${tilt.toFixed(1)}° from vertical`;
     pill(ctx, text, mx + 14, my - 18, s.color, w, h);
     return;
   }
@@ -117,47 +113,6 @@ function drawLabels(ctx: CanvasRenderingContext2D, s: Shape, w: number, h: numbe
       pill(ctx, s.label, x, y, s.color, w, h);
     }
   }
-}
-
-function drawHandles(
-  ctx: CanvasRenderingContext2D,
-  s: Shape,
-  w: number,
-  h: number,
-  hover: { shapeId: string; index: number } | null,
-  touch = false,
-  grips = false,
-) {
-  if (!hasHandles(s)) return;
-  ctx.save();
-  ctx.shadowBlur = 0;
-  if (grips) {
-    // Translucent grip rings: a finger-sized target whose centre stays visible.
-    s.points.forEach((p) => {
-      const q = toPx(p, w, h);
-      ctx.beginPath();
-      ctx.arc(q.x, q.y, TOUCH_GRIP_RADIUS, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(248, 250, 252, 0.10)";
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.globalAlpha = 0.55;
-      ctx.strokeStyle = s.color;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    });
-  }
-  s.points.forEach((p, i) => {
-    const q = toPx(p, w, h);
-    const isHover = hover && hover.shapeId === s.id && hover.index === i;
-    ctx.beginPath();
-    ctx.arc(q.x, q.y, isHover ? 8 : touch ? 6.5 : 5.5, 0, Math.PI * 2);
-    ctx.fillStyle = isHover ? s.color : "rgba(2, 6, 23, 0.9)";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = isHover ? "#ffffff" : s.color;
-    ctx.stroke();
-  });
-  ctx.restore();
 }
 
 export function renderScene(ctx: CanvasRenderingContext2D, shapes: Shape[], opts: RenderOptions) {
@@ -191,14 +146,8 @@ export function renderScene(ctx: CanvasRenderingContext2D, shapes: Shape[], opts
     ctx.setLineDash([]);
     ctx.shadowBlur = 0;
     // Reference presets stay clean: just the guide line/shape, no measurement pill.
-    if (!s.presetId) drawLabels(ctx, s, w, h);
+    if (!s.presetId) drawLabels(ctx, s, w, h, opts.showLineTilt ?? true);
     ctx.restore();
-
-    // Handle dots: user drawings in Move mode, anything selected, and the shape being drawn.
-    // Presets only show them while selected, so they don't clutter the video.
-    if ((opts.showHandles && !s.presetId) || selected || s === opts.draft) {
-      drawHandles(ctx, s, w, h, opts.hoverHandle, !!opts.touch, !!opts.touch && (selected || s === opts.draft));
-    }
   }
 }
 

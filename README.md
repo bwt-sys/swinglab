@@ -23,7 +23,7 @@ Then open http://localhost:3000. Requires Node 20.9+.
 - **Frame-accurate transport**: play/pause, 0.1x / 0.25x / 0.5x / 1x, a smooth scrubber, and ±1 frame stepping at a 30 or 60 fps setting.
 - **Checkpoints**: Address (A), Top (T), Impact (I) and Finish (F). One click tags the current frame or jumps to an existing tag. Shows backswing time, downswing time and tempo ratio.
 - **Telestrator** canvas aligned to the video at any window size: Line, Circle, 3-point Angle with live degrees, Freehand Pen, 4 neon colors, Undo and Clear All. In Move mode you can drag whole shapes and delete the selected one.
-- **Live measurements**: angle degrees, line tilt from vertical, and other shape sizes in the sidebar.
+- **Live measurements**: angle degrees, line tilt from vertical, and other shape sizes in the sidebar. The on-video tilt labels can be hidden with the **Line °** toolbar button (or V); the sidebar keeps showing them.
 
 ## Keyboard shortcuts
 
@@ -36,6 +36,7 @@ Then open http://localhost:3000. Requires Node 20.9+.
 | 1–5 | Move, Line, Circle, Angle, Pen |
 | Ctrl/⌘ + Z | Undo |
 | Delete | Delete the selected shape |
+| V | Show / hide the "° from vertical" labels on drawn lines |
 | Esc | Cancel the current drawing / deselect |
 
 ## How it fits together

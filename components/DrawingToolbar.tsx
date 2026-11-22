@@ -20,6 +20,9 @@ interface Props {
   onUndo: () => void;
   onClear: () => void;
   hasShapes: boolean;
+  /** "° from vertical" labels on drawn lines. */
+  showLineTilt: boolean;
+  onToggleLineTilt: () => void;
   onExport: () => void;
   canExport: boolean;
   exporting?: boolean;
@@ -55,6 +58,28 @@ export default function DrawingToolbar(p: Props) {
           );
         })}
       </div>
+
+      <button
+        type="button"
+        data-testid="toggle-line-tilt"
+        onClick={p.onToggleLineTilt}
+        aria-pressed={p.showLineTilt}
+        title={`${p.showLineTilt ? "Hide" : "Show"} degrees-from-vertical labels on lines (V)`}
+        aria-label="Line degree labels"
+        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${TOUCH_BTN} ${
+          p.showLineTilt
+            ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-200"
+            : "border-slate-700 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+        }`}
+      >
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 21V3" strokeDasharray="2 3" />
+          <path d="M6 21L17 5" />
+          <path d="M6 13a8 8 0 004.6-1.5" />
+          {!p.showLineTilt && <path d="M3 3l18 18" />}
+        </svg>
+        <span>{p.showLineTilt ? "° On" : "° Off"}</span>
+      </button>
 
       <div className="h-6 w-px bg-slate-700 max-sm:hidden" />
 

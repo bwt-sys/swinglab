@@ -23,6 +23,8 @@ interface Props {
   checkpoint: () => void;
   tool: Tool;
   color: string;
+  /** Show the "° from vertical" pill on drawn lines. */
+  showLineTilt: boolean;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   /** Pose for the current frame (drawn beneath the telestrator). */
@@ -148,6 +150,7 @@ export default function VideoStage(props: Props) {
             checkpoint={props.checkpoint}
             tool={props.tool}
             color={props.color}
+            showLineTilt={props.showLineTilt}
             selectedId={props.selectedId}
             setSelectedId={props.setSelectedId}
           />
