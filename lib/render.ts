@@ -198,8 +198,9 @@ export function renderScene(ctx: CanvasRenderingContext2D, shapes: Shape[], opts
     ctx.restore();
 
     // Handle dots: user drawings in Move mode or selected, and the shape being drawn.
-    // Presets never show them (their endpoints are still draggable), so they don't clutter the video.
-    if (!s.presetId && (opts.showHandles || selected || s === opts.draft)) {
+    // Lines and presets never show them (endpoints are still draggable; the cursor turns to a grab
+    // hand over one), so they don't clutter the video.
+    if (s.kind !== "line" && !s.presetId && (opts.showHandles || selected || s === opts.draft)) {
       drawHandles(ctx, s, w, h, opts.hoverHandle, !!opts.touch, !!opts.touch && (selected || s === opts.draft));
     }
   }
