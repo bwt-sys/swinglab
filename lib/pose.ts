@@ -134,6 +134,22 @@ async function seekTo(el: HTMLVideoElement, t: number) {
   await done;
 }
 
+/** Max long side (px) of the frames given to the model; it works on ~256 px inputs internally. */
+const MAX_FRAME_PX = 1280;
+
+/** An upright (rotation-applied) canvas sized to the video's display dimensions, capped at MAX_FRAME_PX. */
+function frameCanvas(video: HTMLVideoElement): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const k = Math.min(1, MAX_FRAME_PX / Math.max(vw, vh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(vw * k));
+  canvas.height = Math.max(1, Math.round(vh * k));
+  const ctx = canvas.getContext("2d");
+  return ctx ? { canvas, ctx } : null;
+}
+
 export interface AnalyzeOptions {
   src: string;
   fps: number;
@@ -179,6 +195,13 @@ async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
   try {
     if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
 
+    // Feed the model a 2D canvas copy of each frame rather than the <video> itself. Drawing to a
+    // canvas applies the file's rotation flag (phone videos are stored sideways and flagged to
+    // display upright); handing the raw video to WebGL ignores that flag on some browsers (notably
+    // iOS Safari), so the model sees the golfer lying on their side: few detections and joints that
+    // land 90° off. Downscaling also keeps 4K phone video cheap to upload every frame.
+    const frame = frameCanvas(video);
+
     const total = Math.max(1, Math.floor(opts.duration * opts.fps));
     const frames: (PoseFrame | null)[] = new Array(total).fill(null);
     let lastYield = performance.now();
@@ -195,7 +218,12 @@ async function runAnalysis(opts: AnalyzeOptions): Promise<PoseTrack> {
       lastTs = ts;
       tsCursor = ts; // Survives cancellation so the next run keeps increasing.
       try {
-        const res = landmarker.detectForVideo(video, ts);
+        let input: HTMLVideoElement | HTMLCanvasElement = video;
+        if (frame) {
+          frame.ctx.drawImage(video, 0, 0, frame.canvas.width, frame.canvas.height);
+          input = frame.canvas;
+        }
+        const res = landmarker.detectForVideo(input, ts);
         const lms = res.landmarks?.[0];
         if (lms && lms.length >= 33) {
           frames[i] = {
@@ -286,7 +314,7 @@ async function runScan(src: string, t: number): Promise<FrameScan> {
     if (video.readyState < 2) await waitFor(video, "loadeddata", 15000);
     await seekTo(video, Math.max(0, t));
     // Work at ≤ 1280 px on the long side: enough detail for a thin shaft, cheap to scan.
-    const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+    const k = Math.min(1, MAX_FRAME_PX / Math.max(video.videoWidth, video.videoHeight));
     const w = Math.max(1, Math.round(video.videoWidth * k));
     const h = Math.max(1, Math.round(video.videoHeight * k));
     const canvas = document.createElement("canvas");
